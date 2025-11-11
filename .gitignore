@@ -1,0 +1,45 @@
+# Unity项目标准忽略文件
+
+# 编译和构建文件
+Library/
+Temp/
+obj/
+Build/
+Logs/
+
+# IDE相关文件
+.vs/
+.vsconfig
+*.sln
+*.csproj
+*.unityproj
+*.pidb
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pid
+*.pid.lock
+
+# 用户设置
+UserSettings/
+*.sln.DotSettings
+
+# 平台特定文件
+.DS_Store
+Thumbs.db
+
+# 测试相关
+*.orig.*
+
+# 包管理文件（如果使用包管理器，不需要忽略整个Packages目录，只忽略.lock文件）
+Packages/*.lock
+
+# 外部插件目录（如果有需要忽略的特定插件）
+# Plugins/*/Build/
+
+# 第三方工具生成的文件
+
+# 版本控制系统文件
+.git/
+.gitattributes
