@@ -36,7 +36,16 @@ public class CameraCalibrator : MonoBehaviour
     [Header("相机设置")]
     [Tooltip("显示相机图像的RawImage组件")]
     public RawImage cameraFeed;
-    
+
+    // ===========================================================
+    // ChessBoard检测输出
+    // ===========================================================
+    [Header("输出图像")]
+    [Tooltip("显示输出图像的RawImage组件")]
+    public RawImage resultImage;
+
+    private WebCamTexture inputWebCamTexture; // 处理摄像头纹理的情况
+
     // ===========================================================
     // 标定数据存储
     // ===========================================================
@@ -102,14 +111,29 @@ public class CameraCalibrator : MonoBehaviour
     // 处理相机帧 - 核心图像处理逻辑
     private void ProcessFrame()
     {
+        // 检查输入纹理类型（WebCamTexture或普通Texture2D）
+        if (cameraFeed.texture is WebCamTexture)
+        {
+            inputWebCamTexture = cameraFeed.texture as WebCamTexture;
+            // 确保WebCamTexture已经初始化并有数据
+            if (!inputWebCamTexture.isPlaying || inputWebCamTexture.width <= 16 || inputWebCamTexture.height <= 16)
+                return;
+        }
+
         // 获取相机纹理并转换为Mat
-        Texture2D cameraTexture = cameraFeed.texture as Texture2D;
-        if (cameraTexture == null)
-            return;
-            
-        // 将Texture2D转换为OpenCV的Mat格式
-        Mat frameMat = new Mat(cameraTexture.height, cameraTexture.width, CvType.CV_8UC3);
-        Utils.texture2DToMat(cameraTexture, frameMat);
+        Mat frameMat;
+        // 将Unity纹理转换为OpenCV的Mat
+        if (cameraFeed.texture is WebCamTexture)
+        {
+            frameMat = new Mat(inputWebCamTexture.height, inputWebCamTexture.width, CvType.CV_8UC3);
+            Utils.webCamTextureToMat(inputWebCamTexture, frameMat);
+        }
+        else
+        {
+            Texture2D texture2D = cameraFeed.texture as Texture2D;
+            frameMat = new Mat(texture2D.height, texture2D.width, CvType.CV_8UC3);
+            Utils.texture2DToMat(texture2D, frameMat);
+        }
         
         // 创建帧的副本用于显示，避免修改原始帧
         frameMat.copyTo(displayMat);
@@ -131,38 +155,38 @@ public class CameraCalibrator : MonoBehaviour
             new Size(chessboardWidth, chessboardHeight), 
             corners, 
             detectionFlags);
-        
+
         // 如果基本检测失败，尝试更激进的参数
-        if (!found)
-        {
-            // 降低图像分辨率以提高检测成功率
-            Mat resizedGray = new Mat();
-            Imgproc.resize(grayMat, resizedGray, new Size(), 0.5, 0.5, Imgproc.INTER_AREA);
-            
-            // 使用更激进的检测参数
-            int aggressiveFlags = detectionFlags;
-            
-            // 尝试检测
-            found = Calib3d.findChessboardCorners(resizedGray, 
-                new Size(chessboardWidth, chessboardHeight), 
-                corners, 
-                aggressiveFlags);
-            
-            // 如果在缩放图像上检测成功，需要将角点坐标缩放回原始尺寸
-            if (found)
-            {
-                Point[] cornerArray = corners.toArray();
-                for (int i = 0; i < cornerArray.Length; i++)
-                {
-                    cornerArray[i].x *= 2;
-                    cornerArray[i].y *= 2;
-                }
-                corners.fromArray(cornerArray);
-            }
-            
-            resizedGray.Dispose();
-        }
-        
+        //if (!found)
+        //{
+        //    // 降低图像分辨率以提高检测成功率
+        //    Mat resizedGray = new Mat();
+        //    Imgproc.resize(grayMat, resizedGray, new Size(), 0.5, 0.5, Imgproc.INTER_AREA);
+
+        //    // 使用更激进的检测参数
+        //    int aggressiveFlags = detectionFlags;
+
+        //    // 尝试检测
+        //    found = Calib3d.findChessboardCorners(resizedGray, 
+        //        new Size(chessboardWidth, chessboardHeight), 
+        //        corners, 
+        //        aggressiveFlags);
+
+        //    // 如果在缩放图像上检测成功，需要将角点坐标缩放回原始尺寸
+        //    if (found)
+        //    {
+        //        Point[] cornerArray = corners.toArray();
+        //        for (int i = 0; i < cornerArray.Length; i++)
+        //        {
+        //            cornerArray[i].x *= 2;
+        //            cornerArray[i].y *= 2;
+        //        }
+        //        corners.fromArray(cornerArray);
+        //    }
+
+        //    resizedGray.Dispose();
+        //}
+
         // 如果检测到棋盘格，进行亚像素精确化
         // 使用亚像素级精确化来提高角点检测精度
         if (found)
@@ -178,13 +202,13 @@ public class CameraCalibrator : MonoBehaviour
                 found);
                 
             // 绘制文字提示
-            Imgproc.putText(displayMat, "棋盘格已检测到！", new Point(10, 30), 
+            Imgproc.putText(displayMat, "Chessboard Detected", new Point(10, 30), 
                 Imgproc.FONT_HERSHEY_SIMPLEX, 1.0, new Scalar(0, 255, 0), 2);
         }
         else
         {
             // 绘制提示信息
-            Imgproc.putText(displayMat, "请将棋盘格置于相机前", new Point(10, 30), 
+            Imgproc.putText(displayMat, "Put Chessboard ahead camera", new Point(10, 30), 
                 Imgproc.FONT_HERSHEY_SIMPLEX, 1.0, new Scalar(0, 0, 255), 2);
         }
         
@@ -221,6 +245,16 @@ public class CameraCalibrator : MonoBehaviour
         // 如果displayMat不为空，可以在这里实现检测结果的显示
         // 实际使用时，可以通过UI脚本中的detectionResultImage来显示
         // 这里我们先保持简单，让UI脚本来处理显示
+
+        // 将处理后的Mat转换回Texture
+        if (resultImage != null)
+        {
+            Texture processedTexture;
+            processedTexture = new Texture2D(displayMat.cols(), displayMat.rows(), TextureFormat.RGB24, false);
+            Utils.matToTexture2D(displayMat, processedTexture as Texture2D);
+            // 赋值给输出RawImage
+            resultImage.texture = processedTexture;
+        }
     }
     
     // 获取当前处理后的显示图像
