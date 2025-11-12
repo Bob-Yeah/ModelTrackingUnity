@@ -83,8 +83,19 @@ public class OpenCamera : MonoBehaviour
             int requestedHeight = Mathf.Min(Screen.height, 720);
             Debug.Log($"请求相机分辨率: {requestedWidth}x{requestedHeight}");
             
-            // 注：Unity的WebCamTexture在创建时会选择最接近请求分辨率的实际支持分辨率
-            currentWebCam = new WebCamTexture(devices[index].name, requestedWidth, requestedHeight, 30);
+            // 在Windows平台上使用更可靠的初始化方式
+            // 在Windows上直接使用设备名称有时会失败
+            if (Application.platform == RuntimePlatform.WindowsEditor || Application.platform == RuntimePlatform.WindowsPlayer)
+            {
+                Debug.Log("Windows平台检测到，使用默认构造函数创建WebCamTexture");
+                // 使用默认构造函数，Unity会自动选择合适的相机
+                currentWebCam = new WebCamTexture(requestedWidth, requestedHeight, 30);
+            }
+            else
+            {
+                // 在其他平台上使用设备名称
+                currentWebCam = new WebCamTexture(devices[index].name, requestedWidth, requestedHeight, 30);
+            }
             
             // 注：WebCamTexture不直接提供获取相机支持的所有分辨率的API
             // 但我们可以通过创建后检查实际分辨率来了解相机使用了什么分辨率
@@ -109,7 +120,15 @@ public class OpenCamera : MonoBehaviour
         if (success && currentWebCam != null)
         {
             rawImage.texture = currentWebCam;
-            currentWebCam.Play();
+            
+            while (true)
+            {
+                currentWebCam.Play();
+                if (currentWebCam.isPlaying)
+                {
+                    break;
+                }
+            }
             
             // 等待一帧以确保videoRotationAngle已更新，同时让WebCamTexture初始化完成
             yield return null;

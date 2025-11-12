@@ -132,6 +132,7 @@ GameObject:
   m_Component:
   - component: {fileID: 251828712}
   - component: {fileID: 251828711}
+  - component: {fileID: 251828713}
   m_Layer: 0
   m_Name: ColorHistogram
   m_TagString: Untagged
@@ -167,6 +168,22 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &251828713
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 251828710}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a21eedfe84174234889b5c4c36d0424f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  inputRawImage: {fileID: 1693576259}
+  outputRawImage: {fileID: 462677205}
+  updateEveryFrame: 0
+  processingRate: 0.1
 --- !u!1 &462677203
 GameObject:
   m_ObjectHideFlags: 0
