@@ -220,7 +220,7 @@ public class CameraCalibrator : MonoBehaviour
             OnChessboardDetectedChanged?.Invoke(found);
             
             // 记录检测状态变化
-            string statusMsg = "棋盘格检测状态: " + (found ? "检测到" : "未检测到");
+            string statusMsg = "Chessboard detection: " + (found ? "Detected" : "Not Detected");
             Debug.Log(statusMsg);
             
             // 触发状态变化事件
@@ -286,7 +286,7 @@ public class CameraCalibrator : MonoBehaviour
     private void SetError(string errorMsg)
     {
         lastError = errorMsg;
-        Debug.LogError("相机标定错误: " + errorMsg);
+        Debug.LogError("Camera Calibration Error: " + errorMsg);
         OnErrorOccurred?.Invoke(errorMsg);
     }
     
@@ -297,7 +297,7 @@ public class CameraCalibrator : MonoBehaviour
     private void SetWarning(string warningMsg)
     {
         lastWarning = warningMsg;
-        Debug.LogWarning("相机标定警告: " + warningMsg);
+        Debug.LogWarning("Camera Calibration Warn:" + warningMsg);
         OnWarningOccurred?.Invoke(warningMsg);
     }
     
@@ -374,16 +374,16 @@ public class CameraCalibrator : MonoBehaviour
             
             // 记录保存信息和提示
             int frameCount = imagePoints.Count;
-            string statusMsg = "成功保存第 " + frameCount + " 帧标定数据，角点数: " + corners.size().height;
+            string statusMsg = "Saving " + frameCount + " frame, Corner points: " + corners.size().height;
             
             // 根据帧数给出提示
             if (frameCount < 5)
             {
-                statusMsg += " (建议至少收集5帧数据)";
+                statusMsg += " (5 frames needed)";
             }
             else if (frameCount < 10)
             {
-                statusMsg += " (从更多角度收集数据可提高精度)";
+                statusMsg += " (more frame to improve accuracy)";
             }
             
             Debug.Log(statusMsg);
@@ -396,9 +396,9 @@ public class CameraCalibrator : MonoBehaviour
         }
         catch (Exception ex)
         {
-            string errorMsg = "保存帧数据时发生异常: " + ex.Message;
+            string errorMsg = "Error when saving: " + ex.Message;
             SetError(errorMsg);
-            Debug.LogError("异常详情: " + ex.ToString());
+            Debug.LogError("Error: " + ex.ToString());
             
             // 尝试清理可能的不完整数据
             try
@@ -522,7 +522,7 @@ public class CameraCalibrator : MonoBehaviour
             rvecs.Clear();
             tvecs.Clear();
             
-            string statusMsg = "开始相机标定计算，使用 " + imagePoints.Count + " 帧数据...";
+            string statusMsg = "Start Calibration " + imagePoints.Count + " frames used...";
             Debug.Log(statusMsg);
             OnStatusChanged?.Invoke(statusMsg);
             
@@ -663,12 +663,12 @@ public class CameraCalibrator : MonoBehaviour
             else if (bestRms < 2.0)
             {
                 Debug.Log("标定质量: 可接受");
-                SetWarning("RMS误差略高，可考虑收集更多数据提高精度");
+                SetWarning("RMS High");
             }
             else
             {
                 Debug.Log("标定质量: 一般");
-                SetWarning("RMS误差较高，建议重新标定并收集更多角度的数据");
+                SetWarning("RMS very High");
             }
             
             Debug.Log(string.Format("平均重投影误差: {0:F3} 像素", reprojectionError));
@@ -964,18 +964,18 @@ public class CameraCalibrator : MonoBehaviour
     public string GetCalibrationQualityRating()
     {
         if (cameraMatrix.empty() || distCoeffs.empty())
-            return "未标定";
+            return "NotCalibrated";
             
         double rms = CalculateReprojectionError();
         
         if (rms < 0.5)
-            return "优秀 (RMS < 0.5)";
+            return "Excellent RMS < 0.5";
         else if (rms < 1.0)
-            return "良好 (RMS < 1.0)";
+            return "Good RMS < 1.0";
         else if (rms < 2.0)
-            return "可接受 (RMS < 2.0)";
+            return "Acceptable RMS < 2.0";
         else
-            return "一般 (RMS >= 2.0)";
+            return "Not Good RMS >= 2.0";
     }
     
     /// <summary>

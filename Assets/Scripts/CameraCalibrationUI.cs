@@ -18,27 +18,20 @@ public class CameraCalibrationUI : MonoBehaviour
     public Button saveFrameButton;
     public Button calibrateButton;
     public Button clearDataButton;
-    public Text frameCountText;
-    public Text statusText;
-    public Text platformInfoText;    // 显示平台信息的文本
-    public Text qualityText;         // 显示标定质量评级
-    public RawImage cameraFeed;
-    public RawImage detectionResultImage;
+    public TMPro.TextMeshProUGUI frameCountText;
+    public TMPro.TextMeshProUGUI statusText;
+    public TMPro.TextMeshProUGUI platformInfoText;    // 显示平台信息的文本
+    public TMPro.TextMeshProUGUI qualityText;         // 显示标定质量评级
     
     // 错误和警告面板
     public GameObject errorPanel;
-    public Text errorText;
+    public TMPro.TextMeshProUGUI errorText;
     public GameObject warningPanel;
-    public Text warningText;
+    public TMPro.TextMeshProUGUI warningText;
     
     // 加载指示器
     public GameObject loadingIndicator;
     
-    // 棋盘格参数设置UI
-    public InputField chessboardWidthInput;
-    public InputField chessboardHeightInput;
-    public InputField squareSizeInput;
-    public Button applySettingsButton;
     
     void Start()
     {
@@ -61,9 +54,6 @@ public class CameraCalibrationUI : MonoBehaviour
         if (clearDataButton != null)
             clearDataButton.onClick.AddListener(OnClearDataButtonClicked);
         
-        if (applySettingsButton != null)
-            applySettingsButton.onClick.AddListener(ApplyChessboardSettings);
-        
         // 注册标定管理器事件
         if (calibrator != null)
         {
@@ -73,8 +63,6 @@ public class CameraCalibrationUI : MonoBehaviour
             calibrator.OnWarningOccurred += OnWarningOccurred;
             calibrator.OnStatusChanged += OnStatusChanged;
             
-            // 初始化棋盘格参数输入框
-            UpdateChessboardSettingsUI();
         }
         
         // 更新初始帧数显示
@@ -94,42 +82,26 @@ public class CameraCalibrationUI : MonoBehaviour
         {
             string platformName = Application.platform.ToString();
             string dataPath = Application.persistentDataPath;
-            string saveDirInfo = GetPlatformSaveDirectoryInfo();
+            string saveDirInfo = System.IO.Path.Combine(dataPath + "CalibrationData");
             
-            platformInfoText.text = string.Format("平台: {0}\n保存目录: {1}", 
+            platformInfoText.text = string.Format("Platform:{0}\nSaving Folder{1}", 
                 platformName, saveDirInfo);
-        }
-    }
-    
-    // 获取平台特定的保存目录信息
-    private string GetPlatformSaveDirectoryInfo()
-    {
-        switch (Application.platform)
-        {
-            case RuntimePlatform.WindowsEditor:
-                return "项目目录/CalibrationData";
-            case RuntimePlatform.Android:
-                return "应用数据目录/Calibration";
-            case RuntimePlatform.IPhonePlayer:
-                return "应用数据目录/Calibration";
-            default:
-                return "应用数据目录/Calibration";
         }
     }
     
     // 检查并显示权限状态
     private void CheckAndShowPermissions()
     {
-        Text targetText = statusText; // 使用已定义的statusText变量
+        TMPro.TextMeshProUGUI targetText = statusText; // 使用已定义的statusText变量
         if (targetText != null && calibrator != null)
         {
             bool hasPermission = calibrator.HasWritePermission();
-            string permissionStatus = hasPermission ? "✓ 文件写入权限正常" : "✗ 文件写入权限受限";
+            string permissionStatus = hasPermission ? "File write good" : "File write restricted";
             
             // 在Android上可能需要额外的权限提示
             if (Application.platform == RuntimePlatform.Android)
             {
-                permissionStatus += " (Android可能需要存储权限)";
+                permissionStatus += " (Android maybe need more permissions)";
             }
             
             targetText.text = permissionStatus;
@@ -153,9 +125,9 @@ public class CameraCalibrationUI : MonoBehaviour
         if (calibrator != null && calibrator.GetDataFrameCount() > 0 && qualityText != null)
         {
             string qualityRating = calibrator.GetCalibrationQualityRating();
-            if (qualityRating != "未标定")
+            if (qualityRating != "NotCalibrated")
             {
-                qualityText.text = "标定质量: " + qualityRating;
+                qualityText.text = "Calibration Quality:" + qualityRating;
                 qualityText.gameObject.SetActive(true);
             }
             else
@@ -175,9 +147,9 @@ public class CameraCalibrationUI : MonoBehaviour
         if (statusText != null)
         {
             if (detected)
-                statusText.text = "已检测到棋盘格！可以保存当前帧。";
+                statusText.text = "Detected Chessboard! Ready to save this frame";
             else
-                statusText.text = "正在检测棋盘格...";
+                statusText.text = "Detecting Chessboard...";
         }
     }
     
@@ -192,13 +164,13 @@ public class CameraCalibrationUI : MonoBehaviour
         if (frameCountText != null && calibrator != null)
         {
             int count = calibrator.GetDataFrameCount();
-            frameCountText.text = string.Format("有效数据帧数: {0}/5+", count);
+            frameCountText.text = string.Format("Valid Frames: {0}/5+", count);
             
             // 更新状态文本以反映新的帧数
             if (count > 0 && count < 5)
-                statusText.text = string.Format("已收集 {0}/5+ 帧数据，请继续收集更多角度的数据。", count);
+                statusText.text = string.Format("Collected {0}/5+ Frames, Collect More Frame from Different Angles", count);
             else if (count >= 5)
-                statusText.text = string.Format("已收集足够数据 ({0} 帧)，可以进行标定。", count);
+                statusText.text = string.Format("Collected ({0} Frames, Ready to Calibrate ", count);
         }
     }
     
@@ -233,7 +205,7 @@ public class CameraCalibrationUI : MonoBehaviour
             
             if (count < 5)
             {
-                ShowStatusMessage("数据帧数不足，请至少收集5帧不同角度的数据。", Color.red);
+                ShowStatusMessage("More frame needed", Color.red);
                 return;
             }
             
@@ -250,7 +222,7 @@ public class CameraCalibrationUI : MonoBehaviour
     // 相机标定协程
     private System.Collections.IEnumerator CalibrateCameraCoroutine()
     {
-        ShowStatusMessage("正在进行相机标定计算，请稍候...", Color.yellow);
+        ShowStatusMessage("Calibrating...", Color.yellow);
         
         // 显示加载指示器（如果有）
         if (loadingIndicator != null)
@@ -267,13 +239,13 @@ public class CameraCalibrationUI : MonoBehaviour
         {
             // 显示标定质量信息
             string qualityRating = calibrator.GetCalibrationQualityRating();
-            ShowStatusMessage("相机标定计算完成，质量评级: " + qualityRating, Color.green);
+            ShowStatusMessage("Calibration Completed, Quality: " + qualityRating, Color.green);
             
             // 延迟一下再保存，让用户看到质量信息
             yield return new WaitForSeconds(1f);
             
             // 尝试保存标定结果
-            ShowStatusMessage("正在保存标定结果...", Color.yellow);
+            ShowStatusMessage("Save Calibration Result...", Color.yellow);
             bool saveSuccess = calibrator.SaveCalibrationResult("camera_calibration.json");
         }
         
@@ -296,7 +268,7 @@ public class CameraCalibrationUI : MonoBehaviour
                 clearDataButton.interactable = false;
             
             calibrator.ClearCalibrationData();
-            ShowStatusMessage("所有标定数据已清除。", Color.blue);
+            ShowStatusMessage("All calibration date cleared", Color.blue);
             
             // 清除错误和警告面板
             if (errorPanel != null)
@@ -318,12 +290,12 @@ public class CameraCalibrationUI : MonoBehaviour
     // 错误处理事件
     private void OnErrorOccurred(string errorMessage)
     {
-        Debug.LogError("UI接收到错误: " + errorMessage);
+        Debug.LogError("UI receiced error:" + errorMessage);
         
         // 显示错误面板（如果有）
         if (errorText != null && errorPanel != null)
         {
-            errorText.text = "错误: " + errorMessage;
+            errorText.text = "Error:" + errorMessage;
             errorPanel.SetActive(true);
             
             // 3秒后自动隐藏错误面板
@@ -337,12 +309,12 @@ public class CameraCalibrationUI : MonoBehaviour
     // 警告处理事件
     private void OnWarningOccurred(string warningMessage)
     {
-        Debug.LogWarning("UI接收到警告: " + warningMessage);
+        Debug.LogWarning("UI received warning:" + warningMessage);
         
         // 显示警告面板（如果有）
         if (warningText != null && warningPanel != null)
         {
-            warningText.text = "警告: " + warningMessage;
+            warningText.text = "Warning:" + warningMessage;
             warningPanel.SetActive(true);
             
             // 5秒后自动隐藏警告面板
@@ -404,86 +376,12 @@ public class CameraCalibrationUI : MonoBehaviour
         }
     }
     
-    private void UpdateChessboardSettingsUI()
-    {
-        if (calibrator == null)
-            return;
-            
-        if (chessboardWidthInput != null)
-            chessboardWidthInput.text = calibrator.chessboardWidth.ToString();
-            
-        if (chessboardHeightInput != null)
-            chessboardHeightInput.text = calibrator.chessboardHeight.ToString();
-            
-        if (squareSizeInput != null)
-            squareSizeInput.text = calibrator.squareSize.ToString("F3");
-    }
-    
-    private void ApplyChessboardSettings()
-    {
-        if (calibrator == null)
-            return;
-            
-        try
-        {
-            if (chessboardWidthInput != null && !string.IsNullOrEmpty(chessboardWidthInput.text))
-            {
-                int width = int.Parse(chessboardWidthInput.text);
-                if (width > 2) // 至少需要3个内角点
-                    calibrator.chessboardWidth = width;
-            }
-            
-            if (chessboardHeightInput != null && !string.IsNullOrEmpty(chessboardHeightInput.text))
-            {
-                int height = int.Parse(chessboardHeightInput.text);
-                if (height > 2) // 至少需要3个内角点
-                    calibrator.chessboardHeight = height;
-            }
-            
-            if (squareSizeInput != null && !string.IsNullOrEmpty(squareSizeInput.text))
-            {
-                float size = float.Parse(squareSizeInput.text);
-                if (size > 0) // 必须为正数
-                    calibrator.squareSize = size;
-            }
-            
-            ShowStatusMessage("棋盘格参数已更新。", Color.blue);
-        }
-        catch (Exception e)
-        {
-            ShowStatusMessage("参数格式错误：" + e.Message, Color.red);
-        }
-    }
     
     void Update()
     {
         UpdateUIState();
-        UpdateDetectionDisplay();
     }
-    
-    private void UpdateDetectionDisplay()
-    {
-        if (calibrator == null || detectionResultImage == null)
-            return;
-        
-        // 获取标定器处理后的显示图像
-        Mat displayMat = calibrator.GetDisplayMat();
-        if (displayMat.empty())
-            return;
-        
-        // 创建或更新Texture2D用于显示
-        Texture2D displayTexture = detectionResultImage.texture as Texture2D;
-        if (displayTexture == null || 
-            displayTexture.width != displayMat.cols() || 
-            displayTexture.height != displayMat.rows())
-        {
-            displayTexture = new Texture2D(displayMat.cols(), displayMat.rows(), TextureFormat.RGB24, false);
-            detectionResultImage.texture = displayTexture;
-        }
-        
-        // 将Mat转换为Texture2D
-        Utils.matToTexture2D(displayMat, displayTexture);
-    }
+
     
     void OnDestroy()
     {
