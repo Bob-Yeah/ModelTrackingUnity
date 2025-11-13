@@ -5,10 +5,195 @@ using UnityEditor;
 using System.IO;
 using System.Linq;
 using System;
+using Newtonsoft.Json;
 
 [ExecuteInEditMode]
 public class ModelLoader : MonoBehaviour
 {
+    // ===========================================================
+    // 相机标定相关
+    // ===========================================================
+    [Header("相机标定设置")]
+    [Tooltip("是否使用相机标定文件")]
+    [SerializeField] private bool _useCameraCalibration = true;
+    [Tooltip("标定文件路径")]
+    [SerializeField] private string _calibrationFilePath = "CalibrationData/camera_calibration.json";
+    
+    /// <summary>
+    /// 标定数据类，用于JSON序列化/反序列化
+    /// 与CameraCalibrator中的CalibrationData保持一致
+    /// </summary>
+    [System.Serializable]
+    private class CalibrationData
+    {
+        public double[] cameraMatrix;     // 3x3相机矩阵
+        public double[] distCoeffs;       // 畸变系数
+        public int imageWidth;            // 图像宽度
+        public int imageHeight;           // 图像高度
+        public double rmsError;           // RMS误差
+        public int frameCount;            // 使用的帧数
+        public int chessboardWidth;       // 棋盘格宽度
+        public int chessboardHeight;      // 棋盘格高度
+        public float squareSize;          // 棋盘格方块大小
+        public string timestamp;          // 标定时间戳
+        public string unityVersion;       // Unity版本
+        public string platform;           // 平台信息
+    }
+    
+    /// <summary>
+    /// 从标定文件加载相机参数并应用到相机
+    /// </summary>
+    /// <param name="camera">要应用参数的相机</param>
+    private void ApplyCameraCalibration(Camera camera)
+    {
+        if (!_useCameraCalibration)
+        {
+            Debug.Log("未启用相机标定，使用默认相机参数");
+            return;
+        }
+        
+        try
+        {
+            // 构建完整的标定文件路径
+            string fullPath = _calibrationFilePath;
+            if (!Path.IsPathRooted(fullPath))
+            {
+                // 如果是相对路径，尝试在项目根目录下查找
+                fullPath = Path.Combine(Application.dataPath, "..", fullPath);
+            }
+            
+            // 检查文件是否存在
+            if (!File.Exists(fullPath))
+            {
+                // 尝试查找最新的标定文件
+                string calibDir = Path.Combine(Application.dataPath, "..", "CalibrationData");
+                if (Directory.Exists(calibDir))
+                {
+                    string[] calibFiles = Directory.GetFiles(calibDir, "camera_calibration_*.json");
+                    if (calibFiles.Length > 0)
+                    {
+                        // 按修改时间排序，取最新的
+                        Array.Sort(calibFiles, (a, b) => File.GetLastWriteTime(b).CompareTo(File.GetLastWriteTime(a)));
+                        fullPath = calibFiles[0];
+                        Debug.Log("使用最新的标定文件: " + fullPath);
+                    }
+                    else
+                    {
+                        Debug.LogWarning("未找到相机标定文件: " + _calibrationFilePath);
+                        return;
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning("标定目录不存在: " + calibDir);
+                    return;
+                }
+            }
+            
+            // 读取并解析标定文件
+            string jsonData = File.ReadAllText(fullPath);
+            CalibrationData calibData = JsonConvert.DeserializeObject<CalibrationData>(jsonData);
+            
+            if (calibData == null || calibData.cameraMatrix == null || calibData.cameraMatrix.Length < 9)
+            {
+                Debug.LogError("标定文件格式错误，无法解析相机矩阵");
+                return;
+            }
+            
+            // 从相机矩阵中提取内参
+            // 相机矩阵格式: [fx, 0, cx, 0, fy, cy, 0, 0, 1]
+            double fx = calibData.cameraMatrix[0]; // 焦距x
+            double fy = calibData.cameraMatrix[4]; // 焦距y
+            double cx = calibData.cameraMatrix[2]; // 主点x
+            double cy = calibData.cameraMatrix[5]; // 主点y
+            
+            int imageWidth = calibData.imageWidth > 0 ? calibData.imageWidth : 1280;
+            int imageHeight = calibData.imageHeight > 0 ? calibData.imageHeight : 720;
+            
+            Debug.Log($"成功加载相机标定数据: fx={fx}, fy={fy}, cx={cx}, cy={cy}");
+            Debug.Log($"标定图像分辨率: {imageWidth}x{imageHeight}, RMS误差: {calibData.rmsError}");
+            
+            // 在Unity中设置等效的相机参数
+            // 计算等效的视场角(FOV)
+            // 注意：Unity的FOV是垂直方向的，而标定文件中的焦距通常对应于特定分辨率
+            float aspectRatio = (float)imageWidth / (float)imageHeight;
+            float verticalFOV = CalculateVerticalFOV(fy, imageHeight);
+            
+            // 设置相机的视场角
+            camera.fieldOfView = verticalFOV;
+            Debug.Log($"设置相机垂直FOV: {verticalFOV}度，宽高比: {aspectRatio}");
+            
+            // 计算主点偏移量
+            // Unity相机默认主点在图像中心，需要计算偏移比例
+            float principalPointOffsetX = (float)((cx / imageWidth) - 0.5f);
+            float principalPointOffsetY = (float)((cy / imageHeight) - 0.5f);
+            Debug.Log($"主点偏移比例: X={principalPointOffsetX}, Y={principalPointOffsetY}");
+            
+            // 应用主点偏移
+            // Unity相机不直接支持设置主点偏移，但可以通过以下方式处理：
+            // 1. 保存主点偏移参数，供着色器或后处理使用
+            ApplyPrincipalPointOffset(camera, principalPointOffsetX, principalPointOffsetY, imageWidth, imageHeight);
+            
+            // 注意：完整的标定应用还需要考虑畸变系数
+            // 畸变校正通常在着色器或后处理阶段进行
+        }
+        catch (Exception e)
+        {
+            Debug.LogError("加载和应用相机标定数据时出错: " + e.Message);
+            Debug.LogError("堆栈跟踪: " + e.StackTrace);
+        }
+    }
+    
+    /// <summary>
+    /// 根据焦距和图像高度计算垂直视场角
+    /// </summary>
+    /// <param name="focalLength">焦距(像素)</param>
+    /// <param name="imageHeight">图像高度(像素)</param>
+    /// <returns>垂直视场角(度)</returns>
+    private float CalculateVerticalFOV(double focalLength, int imageHeight)
+    {
+        // 使用标准的FOV计算公式: 2 * arctan(imageHeight/(2*focalLength))
+        double halfHeight = imageHeight / 2.0;
+        double radians = 2.0 * Math.Atan(halfHeight / focalLength);
+        return (float)(radians * 180.0 / Math.PI);
+    }
+    
+    /// <summary>
+    /// 应用主点偏移
+    /// 注意：Unity相机不直接支持设置主点偏移，这里使用几种可能的方法来模拟
+    /// </summary>
+    /// <param name="camera">目标相机</param>
+    /// <param name="offsetX">X方向主点偏移比例(-0.5到0.5)</param>
+    /// <param name="offsetY">Y方向主点偏移比例(-0.5到0.5)</param>
+    /// <param name="imageWidth">图像宽度</param>
+    /// <param name="imageHeight">图像高度</param>
+    private void ApplyPrincipalPointOffset(Camera camera, float offsetX, float offsetY, int imageWidth, int imageHeight)
+    {
+        // 方法1：通过设置camera的projectionMatrix来应用主点偏移
+        // 这种方法会修改投影矩阵，适用于需要精确相机参数的情况
+        Matrix4x4 projMatrix = camera.projectionMatrix;
+        
+        // 计算投影矩阵中需要修改的偏移量
+        // 投影矩阵中的平移分量对应于主点偏移
+        float projOffsetX = 2.0f * offsetX;
+        float projOffsetY = 2.0f * offsetY;
+        
+        // 修改投影矩阵的平移分量
+        projMatrix.m02 += projOffsetX;
+        projMatrix.m12 += projOffsetY;
+        
+        // 应用修改后的投影矩阵
+        camera.projectionMatrix = projMatrix;
+        
+        Debug.Log($"已应用主点偏移到相机投影矩阵: X={offsetX}, Y={offsetY}");
+        
+        // 方法2：保存主点偏移数据供着色器使用
+        // 可以通过shader.SetFloat等方式将这些参数传递给着色器
+        // 这种方法更适合处理畸变校正等复杂情况
+        
+        // 方法3：对于简单应用，可以通过调整相机位置来模拟主点偏移
+        // 但这种方法不是真正的主点偏移，只是近似模拟
+    }
 #if UNITY_EDITOR
     [Header("OBJ模型加载器")]
     [SerializeField] private string _objFilePath = "";
@@ -396,10 +581,15 @@ public class ModelLoader : MonoBehaviour
         // 创建临时相机
         GameObject cameraObj = new GameObject("SnapshotCamera");
         Camera snapshotCamera = cameraObj.AddComponent<Camera>();
+        
+        // 首先设置默认FOV，后面可能会被标定数据覆盖
         snapshotCamera.fieldOfView = 45f;
         snapshotCamera.backgroundColor = _useTransparentBackground ? new Color(0, 0, 0, 0) : _backgroundColor;
         snapshotCamera.clearFlags = _useTransparentBackground ? CameraClearFlags.SolidColor : CameraClearFlags.SolidColor;
         snapshotCamera.targetTexture = new RenderTexture(_textureSize, _textureSize, 24);
+        
+        // 尝试应用相机标定参数
+        ApplyCameraCalibration(snapshotCamera);
         
         // 创建RenderTexture和Texture2D用于截图
         RenderTexture renderTexture = new RenderTexture(_textureSize, _textureSize, 24);
