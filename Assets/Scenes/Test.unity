@@ -1942,6 +1942,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: ColorHistogram
       objectReference: {fileID: 0}
+    - target: {fileID: 7067130564816673702, guid: f4710b3f3ab5fad42ad62dd5a18c5df8, type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 9032579758932362040, guid: f4710b3f3ab5fad42ad62dd5a18c5df8, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0

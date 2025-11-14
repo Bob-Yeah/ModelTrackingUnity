@@ -21,5 +21,7 @@ namespace ModelTracker
             R = new Matx33f(Rmat);
             t = new Vector3((float)tvec.get(0, 0)[0], (float)tvec.get(1, 0)[0], (float)tvec.get(2, 0)[0]);
         }
+        
     }
+    
 }
