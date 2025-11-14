@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 using UnityEditor;
 using System.IO;
@@ -558,6 +559,14 @@ public class ModelLoader : MonoBehaviour
             Directory.CreateDirectory(saveDirectory);
         }
         
+        // 创建Assets资源目录用于保存深度图
+        string assetsDepthDir = Path.Combine(Application.dataPath, "DepthMaps");
+        if (!Directory.Exists(assetsDepthDir))
+        {
+            Directory.CreateDirectory(assetsDepthDir);
+            Debug.Log($"创建深度图资源目录: {assetsDepthDir}");
+        }
+        
         // 计算模型的中心点
         Renderer[] renderers = _loadedModel.GetComponentsInChildren<Renderer>();
         if (renderers.Length == 0)
@@ -589,16 +598,32 @@ public class ModelLoader : MonoBehaviour
         snapshotCamera.targetTexture = new RenderTexture(_textureSize, _textureSize, 24);
         
         // 尝试应用相机标定参数
-        ApplyCameraCalibration(snapshotCamera);
+        // ApplyCameraCalibration(snapshotCamera);
         
         // 创建RenderTexture和Texture2D用于截图
         RenderTexture renderTexture = new RenderTexture(_textureSize, _textureSize, 24);
         Texture2D screenshotTexture = new Texture2D(_textureSize, _textureSize, _useTransparentBackground ? TextureFormat.RGBA32 : TextureFormat.RGB24, false);
         
+        // 创建深度渲染所需的纹理
+        RenderTexture depthRenderTexture = new RenderTexture(_textureSize, _textureSize, 24, RenderTextureFormat.ARGB32);
+        // 使用32位浮点型纹理存储深度信息
+        Texture2D depthTexture = new Texture2D(_textureSize, _textureSize, TextureFormat.RFloat, false);
+        
+        // 保存原始材质并创建临时的深度着色器材质
+        Dictionary<Renderer, Material[]> originalMaterials = new Dictionary<Renderer, Material[]>();
+        Material depthMaterial = CreateDepthMaterial();
+        
+        // 替换所有渲染器的材质为深度材质
+        foreach (Renderer renderer in _loadedModel.GetComponentsInChildren<Renderer>())
+        {            
+            originalMaterials[renderer] = renderer.sharedMaterials;
+            renderer.sharedMaterials = new Material[] { depthMaterial };
+        }
+        
         // 生成球面上的均匀分布点
         List<Vector3> cameraPositions = GenerateSphericalPoints(_snapshotCount, effectiveRadius, modelCenter);
         
-        Debug.Log($"开始渲染{cameraPositions.Count}个快照...");
+        Debug.Log($"开始渲染{cameraPositions.Count}个快照和深度图...");
         
         for (int i = 0; i < cameraPositions.Count; i++)
         {
@@ -606,7 +631,7 @@ public class ModelLoader : MonoBehaviour
             cameraObj.transform.position = cameraPositions[i];
             cameraObj.transform.LookAt(modelCenter);
             
-            // 渲染到RenderTexture
+            // 渲染到RenderTexture（彩色图）
             RenderTexture.active = renderTexture;
             snapshotCamera.targetTexture = renderTexture;
             snapshotCamera.Render();
@@ -617,23 +642,114 @@ public class ModelLoader : MonoBehaviour
             
             // 保存为PNG文件
             byte[] bytes = screenshotTexture.EncodeToPNG();
-            string fileName = $"snapshot_{i.ToString("D3")}.png";
+            string fileName = $"snapshot_{i.ToString()}.png";
             string filePath = Path.Combine(saveDirectory, fileName);
             File.WriteAllBytes(filePath, bytes);
             
             Debug.Log($"快照已保存: {filePath}");
+            
+            // 渲染深度图
+            RenderDepthMap(snapshotCamera, depthRenderTexture, depthTexture);
+            
+            // 保存深度图到Assets资源目录
+            string depthFileName = $"depth_{i.ToString()}.asset";
+            string depthFilePath = Path.Combine(assetsDepthDir, depthFileName);
+            SaveDepthTextureAsAsset(depthTexture, depthFileName, assetsDepthDir);
+        }
+        
+        // 恢复原始材质
+        foreach (var kvp in originalMaterials)
+        {            
+            kvp.Key.sharedMaterials = kvp.Value;
         }
         
         // 清理资源
         RenderTexture.active = null;
         DestroyImmediate(renderTexture);
         DestroyImmediate(screenshotTexture);
+        DestroyImmediate(depthRenderTexture);
+        DestroyImmediate(depthTexture);
+        DestroyImmediate(depthMaterial);
         DestroyImmediate(cameraObj);
         
-        Debug.Log($"所有快照渲染完成，共{cameraPositions.Count}个文件保存在: {saveDirectory}");
+        Debug.Log($"所有快照和深度图渲染完成，共{cameraPositions.Count}个文件保存在: {saveDirectory}");
+        Debug.Log($"深度图资源保存在: {assetsDepthDir}");
         
 #if UNITY_EDITOR
-        EditorUtility.DisplayDialog("渲染完成", $"成功渲染{cameraPositions.Count}个快照\n保存位置: {saveDirectory}", "确定");
+        // 刷新AssetDatabase以显示新创建的深度图资源
+        UnityEditor.AssetDatabase.Refresh();
+        UnityEditor.EditorUtility.DisplayDialog("渲染完成", $"成功渲染{cameraPositions.Count}个快照和深度图\n保存位置: {saveDirectory}\n深度图资源: Assets/DepthMaps", "确定");
+#endif
+    }
+    
+    /// <summary>
+    /// 创建用于渲染深度图的着色器材质
+    /// </summary>
+    /// <returns>深度着色器材质</returns>
+    private Material CreateDepthMaterial()
+    {
+        // 使用外部shader文件而不是内联代码
+        Shader depthShader = Shader.Find("ModelTracker/DepthOnly");
+        
+        if (depthShader == null)
+        {
+            Debug.LogError("找不到深度着色器文件 'ModelTracker/DepthOnly'。请确保该着色器已被正确创建在 Assets/Materials 目录下。");
+            // 如果找不到shader，返回一个默认的材质
+            return new Material(Shader.Find("Standard"));
+        }
+        
+        Material depthMaterial = new Material(depthShader);
+        return depthMaterial;
+    }
+    
+    /// <summary>
+    /// 渲染深度图
+    /// </summary>
+    /// <param name="camera">渲染相机</param>
+    /// <param name="depthRT">深度渲染目标</param>
+    /// <param name="depthTexture">用于存储深度数据的纹理</param>
+    private void RenderDepthMap(Camera camera, RenderTexture depthRT, Texture2D depthTexture)
+    {
+        // 设置渲染目标
+        RenderTexture.active = depthRT;
+        camera.targetTexture = depthRT;
+        
+        // 清除渲染目标
+        GL.Clear(false, true, new Color(0, 0, 0, 0));
+        
+        // 渲染相机
+        camera.Render();
+        
+        // 读取深度数据到Texture2D
+        depthTexture.ReadPixels(new Rect(0, 0, depthRT.width, depthRT.height), 0, 0);
+        depthTexture.Apply();
+    }
+    
+    /// <summary>
+    /// 将深度纹理保存为Unity资源和EXR文件
+    /// </summary>
+    /// <param name="depthTexture">深度纹理</param>
+    /// <param name="fileName">文件名</param>
+    /// <param name="directoryPath">目录路径</param>
+    private void SaveDepthTextureAsAsset(Texture2D depthTexture, string fileName, string directoryPath)
+    {
+#if UNITY_EDITOR        
+        try
+        {
+            // 保存为EXR文件
+            string exrFileName = Path.GetFileNameWithoutExtension(fileName) + ".exr";
+            string exrFilePath = Path.Combine(directoryPath, exrFileName);
+            
+            // 使用Texture2D的EncodeToEXR方法保存为EXR文件
+            byte[] exrBytes = depthTexture.EncodeToEXR(Texture2D.EXRFlags.CompressZIP);
+            File.WriteAllBytes(exrFilePath, exrBytes);
+            
+            Debug.Log($"深度图EXR文件已保存: {exrFilePath}");
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"保存EXR文件时出错: {e.Message}");
+        }
 #endif
     }
     

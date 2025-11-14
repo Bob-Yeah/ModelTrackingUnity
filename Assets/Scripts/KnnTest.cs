@@ -98,9 +98,11 @@ public class TrackerUnity
             {
                 double u = ui * _du;
                 double v = vi * _dv;
-                Vector3 dir = uv2dir(u, v);
                 
+                Vector3 dir = uv2dir(u, v);
+
                 int index = vi * nU + ui;
+                Debug.Log($"index: {index}, u: {Mathf.Rad2Deg * (float)u}, v: {Mathf.Rad2Deg * (float)v}");
                 uvDirData[index * 3] = dir.x;
                 uvDirData[index * 3 + 1] = dir.y;
                 uvDirData[index * 3 + 2] = dir.z;
