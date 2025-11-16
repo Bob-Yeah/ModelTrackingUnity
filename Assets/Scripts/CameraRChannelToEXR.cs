@@ -12,6 +12,7 @@ using OpenCVForUnity.CoreModule;
 using OpenCVForUnity.ImgcodecsModule;
 using OpenCVForUnity.ImgprocModule;
 using System.Collections.Generic;
+using ModelTracker; // 导入ModelTracker命名空间
 
 /// <summary>
 /// 相机R通道提取与EXR保存工具
@@ -190,149 +191,63 @@ public class CameraRChannelToEXR : MonoBehaviour
                 // 将数据复制到Mat
                 rChannelMat.put(0, 0, rChannelData);
                 
-                // 步骤1: 二值化处理提取物体mask
-                Debug.Log("执行二值化处理提取物体mask");
-                Mat maskMat = new Mat();
-                
-                // 将32位浮点Mat转换为8位用于二值化
-                Mat floatMask = new Mat();
-                rChannelMat.convertTo(floatMask, CvType.CV_8UC1, 255.0);
-                
-                // 二值化：大于0的像素设为255（白色），否则为0（黑色）
-                Imgproc.threshold(floatMask, maskMat, thresholdValue, 255, Imgproc.THRESH_BINARY);
-                Debug.Log($"二值化处理完成，阈值: {thresholdValue}");
-                
-                Debug.Log("二值化处理完成");
-                
-                // 步骤2: 将二值化mask保存为PNG用于debug
                 // 生成时间戳
                 string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                string maskFileName = $"mask_{timestamp}.png";
-                string maskFullPath = Path.Combine(savePath, maskFileName);
                 
-                bool maskSaveSuccess = Imgcodecs.imwrite(maskFullPath, maskMat);
-                if (maskSaveSuccess)
+                // 使用EdgeSampler.Sample方法替代原有的处理逻辑
+                Debug.Log("调用EdgeSampler.Sample方法处理深度图");
+                
+                // 获取相机参数
+                Camera cam = targetCamera != null ? targetCamera : Camera.main;
+                if (cam == null)
                 {
-                    Debug.Log($"二值化mask已成功保存为PNG: {maskFullPath}");
-                    #if UNITY_EDITOR
-                    AssetDatabase.Refresh();
-                    #endif
-                }
-                else
-                {
-                    Debug.LogError($"无法保存二值化mask: {maskFullPath}");
+                    Debug.LogError("无法获取相机");
+                    return;
                 }
                 
-                // 步骤3: 在mask上执行findContour轮廓检测
-                Debug.Log("开始轮廓检测");
-                List<MatOfPoint> contours = new List<MatOfPoint>();
-                Mat hierarchy = new Mat();
+                // 计算相机内参矩阵K
+                float fov = cam.fieldOfView * Mathf.Deg2Rad;
+                float aspectRatio = (float)width / (float)height;
+                float focalLength = (float)(height / 2.0f / Mathf.Tan(fov / 2.0f));
+                float cx = (float)width / 2.0f;
+                float cy = (float)height / 2.0f;
                 
-                // 执行轮廓检测
-                Imgproc.findContours(maskMat, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
-                Debug.Log($"轮廓检测完成，找到 {contours.Count} 个轮廓");
+                // 构建相机内参矩阵K
+                Matx33f K = new Matx33f(
+                    focalLength, 0, cx,
+                    0, focalLength, cy,
+                    0, 0, 1
+                );
                 
-                // 筛选出最大的轮廓（假设是主要物体）
-                MatOfPoint largestContour = null;
-                double maxArea = 0;
+                // 获取相机外参（旋转矩阵R和平移向量t）
+                Matrix4x4 worldToCamera = cam.worldToCameraMatrix;
+                Matrix4x4 cameraToWorld = worldToCamera.inverse;
                 
-                foreach (MatOfPoint contour in contours)
+                // 构建旋转矩阵R
+                Matx33f R = new Matx33f(
+                    cameraToWorld.m00, cameraToWorld.m01, cameraToWorld.m02,
+                    cameraToWorld.m10, cameraToWorld.m11, cameraToWorld.m12,
+                    cameraToWorld.m20, cameraToWorld.m21, cameraToWorld.m22
+                );
+                
+                // 构建平移向量t
+                Vector3 t = new Vector3(
+                    cameraToWorld.m03, 
+                    cameraToWorld.m13, 
+                    cameraToWorld.m23
+                );
+                
+                // 调用EdgeSampler.Sample方法进行处理
+                List<CPoint> sampledPoints = EdgeSampler.Sample(rChannelMat, thresholdValue, maxPointCount, K, R, t, savePath);
+                
+                // 提取世界点用于可视化
+                List<Vector3> worldPoints = new List<Vector3>();
+                foreach (CPoint cPoint in sampledPoints)
                 {
-                    double area = Imgproc.contourArea(contour);
-                    if (area > maxArea)
-                    {
-                        maxArea = area;
-                        largestContour = contour;
-                    }
+                    worldPoints.Add(cPoint.center);
                 }
                 
-                if (largestContour != null)
-                {
-                    Debug.Log($"找到最大轮廓，面积: {maxArea}");
-                    
-                    // 步骤4: 根据轮廓点获取对应深度值
-                    Debug.Log("开始从轮廓点获取深度值");
-                    List<Vector3> pointCloud = new List<Vector3>();
-                    
-                    // 获取轮廓点的数组
-                    Point[] contourPoints = largestContour.toArray();
-                    Debug.Log($"轮廓包含 {contourPoints.Length} 个点");
-                    
-                    // 为了避免处理过多点，进行降采样（可选）
-                    int sampleRate = Mathf.Max(1, contourPoints.Length / maxPointCount); // 最多处理maxPointCount个点
-                    
-                    for (int i = 0; i < contourPoints.Length; i += sampleRate)
-                    {
-                        Point pt = contourPoints[i];
-                        
-                        // 确保点在有效范围内
-                        if (pt.x >= 0 && pt.x < width && pt.y >= 0 && pt.y < height)
-                        {
-                            // 从原始深度图Mat获取深度值（32位浮点）
-                            double[] pixelValue = rChannelMat.get((int)pt.y, (int)pt.x);
-                            float depthValue = (float)pixelValue[0];
-                            
-                            // 只添加有效的深度值（大于0）
-                            if (depthValue > 0)
-                            {
-                                // 存储像素坐标和深度值
-                                pointCloud.Add(new Vector3((float)pt.x, (float)pt.y, depthValue));
-                            }
-                        }
-                    }
-                    
-                    Debug.Log($"成功获取 {pointCloud.Count} 个有效深度点");
-                    
-                    // 步骤5: 使用相机参数将点云反投影到Unity空间
-                    Debug.Log("开始将点云反投影到Unity空间");
-                    List<Vector3> worldPoints = new List<Vector3>();
-                    
-                    // 获取相机参数
-                    Camera cam = Camera.main;
-                    if (cam == null)
-                    {
-                        Debug.LogError("无法获取主相机");
-                        return;
-                    }
-                    
-                    float fov = cam.fieldOfView * Mathf.Deg2Rad;
-                    float aspectRatio = (float)width / (float)height;
-                    
-                    // 计算相机内参
-                    float near = cam.nearClipPlane;
-                    float far = cam.farClipPlane;
-                    float focalLength = (float)(height / 2.0f / Mathf.Tan(fov / 2.0f));
-                    
-                    // 相机的位置和旋转
-                    Matrix4x4 viewMatrix = cam.worldToCameraMatrix;
-                    Matrix4x4 projectionMatrix = cam.projectionMatrix;
-                    Matrix4x4 viewProjectionInverse = (projectionMatrix * viewMatrix).inverse;
-                    
-                    foreach (Vector3 point in pointCloud)
-                    {
-                        // 像素坐标转换为NDC坐标 (-1 to 1)
-                        float x = (2.0f * point.x / width) - 1.0f;
-                        float y = (2.0f * point.y / height) - 1.0f; // Unity中Y轴向下，需要翻转
-                        Debug.Log($"原始深度: {point.z}");
-                        float z = (point.z - near) / (far - near); // 深度值
-                        Debug.Log($"归一化深度: {z}");
-                        
-                        // 创建NDC空间点
-                        Vector4 ndcPoint = new Vector4(x, y, 2.0f * z - 1.0f, 1.0f); // 转换到[-1,1]范围
-                        
-                        // 反投影到世界空间
-                        Vector4 worldPoint = viewProjectionInverse * ndcPoint;
-                        
-                        // 透视除法
-                        if (worldPoint.w != 0.0f)
-                        {
-                            worldPoint /= worldPoint.w;
-                        }
-                        
-                        worldPoints.Add(new Vector3(worldPoint.x, worldPoint.y, worldPoint.z));
-                    }
-                    
-                    Debug.Log($"成功将 {worldPoints.Count} 个点反投影到Unity世界空间");
+                Debug.Log($"成功通过EdgeSampler获取 {worldPoints.Count} 个3D点");
                     
                     // 步骤6: 创建小球可视化反投影点云结果
                     if (visualizePointCloud)
