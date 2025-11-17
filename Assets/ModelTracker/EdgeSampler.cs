@@ -31,33 +31,7 @@ namespace ModelTracker
                 Imgproc.threshold(floatMask, maskMat, thresholdValue, 255, Imgproc.THRESH_BINARY);
                 Debug.Log($"二值化处理完成，阈值: {thresholdValue}");
                 
-                // 步骤2: 将二值化mask保存为PNG用于debug
-                if (!string.IsNullOrEmpty(savePath))
-                {
-                    // 确保保存目录存在
-                    if (!Directory.Exists(savePath))
-                    {
-                        Directory.CreateDirectory(savePath);
-                    }
-                    
-                    // 生成时间戳
-                    string timestamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                    string maskFileName = $"mask_{timestamp}.png";
-                    string maskFullPath = Path.Combine(savePath, maskFileName);
-                    
-                    bool maskSaveSuccess = OpenCVForUnity.ImgcodecsModule.Imgcodecs.imwrite(maskFullPath, maskMat);
-                    if (maskSaveSuccess)
-                    {
-                        Debug.Log($"二值化mask已成功保存为PNG: {maskFullPath}");
-#if UNITY_EDITOR
-                        UnityEditor.AssetDatabase.Refresh();
-#endif
-                    }
-                    else
-                    {
-                        Debug.LogError($"无法保存二值化mask: {maskFullPath}");
-                    }
-                }
+
                 
                 // 步骤3: 在mask上执行findContour轮廓检测
                 Debug.Log("开始轮廓检测");
@@ -107,18 +81,50 @@ namespace ModelTracker
                             // 从原始深度图Mat获取深度值（32位浮点）
                             double[] pixelValue = rChannelMat.get((int)pt.y, (int)pt.x);
                             float depthValue = (float)pixelValue[0];
-                            
+                            Debug.Log($"采样轮廓 {pt.y}, {pt.x}, depth: {depthValue}");
+
+                            //测试用
+                            maskMat.put((int)pt.y, (int)pt.x, 125);
                             // 只添加有效的深度值（大于0）
                             if (depthValue > 0)
                             {
                                 // 存储像素坐标和深度值
-                                pointCloud.Add(new Vector3((float)pt.x, (float)pt.y, depthValue));
+                                pointCloud.Add(new Vector3((float)pt.x, (float)(height-pt.y), depthValue)); //深度值是真实值
                             }
                         }
                     }
                     
                     Debug.Log($"成功获取 {pointCloud.Count} 个有效深度点");
-                    
+
+                    // 步骤2: 将二值化mask保存为PNG用于debug
+                    if (!string.IsNullOrEmpty(savePath))
+                    {
+                        // 确保保存目录存在
+                        if (!Directory.Exists(savePath))
+                        {
+                            Directory.CreateDirectory(savePath);
+                        }
+
+                        // 生成时间戳
+                        string timestamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                        string maskFileName = $"mask_{timestamp}.png";
+                        string maskFullPath = Path.Combine(savePath, maskFileName);
+
+                        bool maskSaveSuccess = OpenCVForUnity.ImgcodecsModule.Imgcodecs.imwrite(maskFullPath, maskMat);
+                        if (maskSaveSuccess)
+                        {
+                            Debug.Log($"二值化mask已成功保存为PNG: {maskFullPath}");
+#if UNITY_EDITOR
+                            UnityEditor.AssetDatabase.Refresh();
+#endif
+                        }
+                        else
+                        {
+                            Debug.LogError($"无法保存二值化mask: {maskFullPath}");
+                        }
+                    }
+
+
                     // 步骤5: 使用相机参数将点云反投影到Unity空间
                     Debug.Log("开始将点云反投影到Unity空间");
                     
@@ -128,7 +134,7 @@ namespace ModelTracker
                     foreach (Vector3 point in pointCloud)
                     {
                         // 使用Projector类的Unproject方法将2D点反投影到3D空间
-                        Vector3 worldPoint = prj.Unproject(point.x, point.y, point.z);
+                        Vector3 worldPoint = prj.Unproject(point.x, point.y, point.z); //x,y 是像素的位置
                         
                         // 创建CPoint并添加到结果列表
                         CPoint cPoint = new CPoint();
@@ -176,8 +182,8 @@ namespace ModelTracker
                 
                 // 计算切线向量
                 Vector2 tangent = new Vector2(
-                    nextPoint.x - prevPoint.x,
-                    nextPoint.y - prevPoint.y
+                    (float)(nextPoint.x - prevPoint.x),
+                    (float)(nextPoint.y - prevPoint.y)
                 );
                 
                 // 法线是切线逆时针旋转90度

@@ -42,7 +42,9 @@ public class CameraRChannelToEXR : MonoBehaviour
         [Tooltip("点云小球大小")]
         [Range(0.0001f, 0.01f)]
         public float sphereSize = 0.001f;
-        
+
+        public GameObject TestProjCube = null;
+
         // 用于存储渲染结果的纹理
         private RenderTexture renderTexture;
         private Texture2D captureTexture;
@@ -184,12 +186,15 @@ public class CameraRChannelToEXR : MonoBehaviour
             }
             
             // 创建OpenCV Mat（32位浮点，单通道）
+            Mat rChannelMatOrigin = new Mat(height, width, CvType.CV_32FC1);
             Mat rChannelMat = new Mat(height, width, CvType.CV_32FC1);
-            
             try
             {
                 // 将数据复制到Mat
-                rChannelMat.put(0, 0, rChannelData);
+                rChannelMatOrigin.put(0, 0, rChannelData);
+
+                // Unity纹理转成Mat，上下翻转
+                Core.flip(rChannelMatOrigin, rChannelMat, 0);
                 
                 // 生成时间戳
                 string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -204,7 +209,7 @@ public class CameraRChannelToEXR : MonoBehaviour
                     Debug.LogError("无法获取相机");
                     return;
                 }
-                
+
                 // 计算相机内参矩阵K
                 float fov = cam.fieldOfView * Mathf.Deg2Rad;
                 float aspectRatio = (float)width / (float)height;
@@ -220,23 +225,46 @@ public class CameraRChannelToEXR : MonoBehaviour
                 );
                 
                 // 获取相机外参（旋转矩阵R和平移向量t）
-                Matrix4x4 worldToCamera = cam.worldToCameraMatrix;
-                Matrix4x4 cameraToWorld = worldToCamera.inverse;
-                
+                Matrix4x4 cameraToWorld = cam.transform.localToWorldMatrix;
+                Matrix4x4 worldToCamera = cameraToWorld.inverse;
+
+
+                Debug.Log($"w2c: {worldToCamera}, c2w: {cameraToWorld}");
+
                 // 构建旋转矩阵R
                 Matx33f R = new Matx33f(
-                    cameraToWorld.m00, cameraToWorld.m01, cameraToWorld.m02,
-                    cameraToWorld.m10, cameraToWorld.m11, cameraToWorld.m12,
-                    cameraToWorld.m20, cameraToWorld.m21, cameraToWorld.m22
+                    worldToCamera.m00, worldToCamera.m01, worldToCamera.m02,
+                    worldToCamera.m10, worldToCamera.m11, worldToCamera.m12,
+                    worldToCamera.m20, worldToCamera.m21, worldToCamera.m22
                 );
                 
                 // 构建平移向量t
                 Vector3 t = new Vector3(
-                    cameraToWorld.m03, 
-                    cameraToWorld.m13, 
-                    cameraToWorld.m23
+                    worldToCamera.m03,
+                    worldToCamera.m13,
+                    worldToCamera.m23
                 );
-                
+
+                ModelTracker.Projector prj_test = new ModelTracker.Projector(K, R, t);
+
+                Vector2 worldPositionAfterProj = prj_test.Project(TestProjCube.transform.position);
+                Debug.Log($"World Position after proj: {worldPositionAfterProj}");
+
+                Vector3 worldPositionAfterProjWithZ = new Vector3(worldPositionAfterProj.x, worldPositionAfterProj.y, 0.52f);
+                Vector3 _unproj = prj_test.Unproject(worldPositionAfterProjWithZ.x, worldPositionAfterProjWithZ.y, worldPositionAfterProjWithZ.z);
+                GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                cube.transform.position = _unproj;
+                cube.transform.localScale = new Vector3(sphereSize, sphereSize, sphereSize);
+                // 设置红色材质以便于识别
+                Renderer _renderer = cube.GetComponent<Renderer>();
+                if (_renderer != null)
+                {
+                    _renderer.sharedMaterial = new Material(Shader.Find("Standard"));
+                    _renderer.sharedMaterial.color = Color.green;
+                }
+
+
+                Debug.Log($"Cam Position: {cam.transform.position}, world origin in cam space: {t}");
                 // 调用EdgeSampler.Sample方法进行处理
                 List<CPoint> sampledPoints = EdgeSampler.Sample(rChannelMat, thresholdValue, maxPointCount, K, R, t, savePath);
                 
@@ -249,20 +277,20 @@ public class CameraRChannelToEXR : MonoBehaviour
                 
                 Debug.Log($"成功通过EdgeSampler获取 {worldPoints.Count} 个3D点");
                     
-                    // 步骤6: 创建小球可视化反投影点云结果
-                    if (visualizePointCloud)
+                // 步骤6: 创建小球可视化反投影点云结果
+                if (visualizePointCloud)
+                {
+                    Debug.Log("开始创建小球可视化点云");
+                        
+                    // 清除之前的小球
+                    ClearPointCloudSpheres();
+                        
+                    // 为每个反投影点创建小球
+                    foreach (Vector3 worldPoint in worldPoints)
                     {
-                        Debug.Log("开始创建小球可视化点云");
-                        
-                        // 清除之前的小球
-                        ClearPointCloudSpheres();
-                        
-                        // 为每个反投影点创建小球
-                        foreach (Vector3 worldPoint in worldPoints)
-                        {
-                            GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                            sphere.transform.position = worldPoint;
-                            sphere.transform.localScale = new Vector3(sphereSize, sphereSize, sphereSize);
+                        GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                        sphere.transform.position = new Vector3(worldPoint.x, worldPoint.y, worldPoint.z); //!opencv的相机坐标系y轴朝下;
+                        sphere.transform.localScale = new Vector3(sphereSize, sphereSize, sphereSize);
                         
                         // 设置红色材质以便于识别
                         Renderer renderer = sphere.GetComponent<Renderer>();
@@ -272,26 +300,21 @@ public class CameraRChannelToEXR : MonoBehaviour
                             renderer.sharedMaterial.color = Color.red;
                         }
                         
-                            // 将小球添加到列表中以便后续清除
-                            pointCloudSpheres.Add(sphere);
-                        }
-                        
-                        Debug.Log($"成功创建 {pointCloudSpheres.Count} 个小球来可视化点云");
+                        // 将小球添加到列表中以便后续清除
+                        pointCloudSpheres.Add(sphere);
                     }
+                        
+                    Debug.Log($"成功创建 {pointCloudSpheres.Count} 个小球来可视化点云");
                 }
-                else
-                {
-                    Debug.LogWarning("未找到轮廓");
-                }
-                
+
                 // 生成文件名（带时间戳避免覆盖）
-                string fileName = $"{fileNamePrefix}_{timestamp}.exr";
+                string fileName = $"{fileNamePrefix}_{timestamp}.png";
                 string fullPath = Path.Combine(savePath, fileName);
-                
-                // 添加调试信息
-                Debug.Log($"尝试保存EXR文件: {fullPath}");
+
+                //// 添加调试信息
+                Debug.Log($"尝试保存PNG文件: {fullPath}");
                 Debug.Log($"Mat信息 - 宽度: {rChannelMat.width()}, 高度: {rChannelMat.height()}, 类型: {rChannelMat.type()}");
-                
+
                 // 检查目录是否可写
                 if (Directory.Exists(savePath))
                 {
@@ -301,67 +324,77 @@ public class CameraRChannelToEXR : MonoBehaviour
                 {
                     Debug.LogError($"保存目录不存在: {savePath}");
                 }
-                
-                // 尝试保存为EXR文件
-                // 修改：尝试不使用类型参数，或使用不同的参数组合
-                MatOfInt saveParams = new MatOfInt();
-                
-                // 尝试不同的保存方式
-                bool success = false;
-                
-                try
+
+                // 尝试保存为PNG作为备选方案
+                bool pngSuccess = Imgcodecs.imwrite(fullPath, rChannelMat * 255);
+                if (pngSuccess)
                 {
-                    // 方法1: 不指定特殊参数
-                    success = Imgcodecs.imwrite(fullPath, rChannelMat);
-                    if (success)
-                    {
-                        Debug.Log("使用默认参数成功保存EXR文件");
-                    }
-                    else
-                    {
-                        Debug.Log("使用默认参数保存失败，尝试指定浮点类型");
-                        // 方法2: 指定浮点类型
-                        saveParams.fromArray(Imgcodecs.IMWRITE_EXR_TYPE_FLOAT);
-                        success = Imgcodecs.imwrite(fullPath, rChannelMat, saveParams);
-                        if (success)
-                        {
-                            Debug.Log("使用浮点类型参数成功保存EXR文件");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError($"保存EXR文件时发生异常: {ex.Message}\n{ex.StackTrace}");
-                }
-                finally
-                {
-                    // 释放参数资源
-                    saveParams.Dispose();
-                }
-                
-                if (success)
-                {
-                    Debug.Log($"R通道数据已成功保存为EXR文件: {fullPath}");
-                    
-                    #if UNITY_EDITOR
-                    // 在Unity编辑器中刷新资源
+                    Debug.Log($"作为备选方案，成功保存为PNG文件: {fileName}");
+#if UNITY_EDITOR
                     AssetDatabase.Refresh();
-                    #endif
+#endif
                 }
-                else
-                {
-                    Debug.LogError($"无法保存EXR文件: {fullPath}");
-                    // 尝试保存为PNG作为备选方案
-                    string pngPath = fullPath.Replace(".exr", ".png");
-                    bool pngSuccess = Imgcodecs.imwrite(pngPath, rChannelMat*255);
-                    if (pngSuccess)
-                    {
-                        Debug.Log($"作为备选方案，成功保存为PNG文件: {pngPath}");
-                        #if UNITY_EDITOR
-                        AssetDatabase.Refresh();
-                        #endif
-                    }
-                }
+
+                //// 尝试保存为EXR文件
+                //// 修改：尝试不使用类型参数，或使用不同的参数组合
+                //MatOfInt saveParams = new MatOfInt();
+
+                //// 尝试不同的保存方式
+                //bool success = false;
+
+                //try
+                //{
+                //    // 方法1: 不指定特殊参数
+                //    success = Imgcodecs.imwrite(fullPath, rChannelMat);
+                //    if (success)
+                //    {
+                //        Debug.Log("使用默认参数成功保存EXR文件");
+                //    }
+                //    else
+                //    {
+                //        Debug.Log("使用默认参数保存失败，尝试指定浮点类型");
+                //        // 方法2: 指定浮点类型
+                //        saveParams.fromArray(Imgcodecs.IMWRITE_EXR_TYPE_FLOAT);
+                //        success = Imgcodecs.imwrite(fullPath, rChannelMat, saveParams);
+                //        if (success)
+                //        {
+                //            Debug.Log("使用浮点类型参数成功保存EXR文件");
+                //        }
+                //    }
+                //}
+                //catch (Exception ex)
+                //{
+                //    Debug.LogError($"保存EXR文件时发生异常: {ex.Message}\n{ex.StackTrace}");
+                //}
+                //finally
+                //{
+                //    // 释放参数资源
+                //    saveParams.Dispose();
+                //}
+
+                //if (success)
+                //{
+                //    Debug.Log($"R通道数据已成功保存为EXR文件: {fullPath}");
+
+                //    #if UNITY_EDITOR
+                //    // 在Unity编辑器中刷新资源
+                //    AssetDatabase.Refresh();
+                //    #endif
+                //}
+                //else
+                //{
+                //    Debug.LogError($"无法保存EXR文件: {fullPath}");
+                //    // 尝试保存为PNG作为备选方案
+                //    string pngPath = fullPath.Replace(".exr", ".png");
+                //    bool pngSuccess = Imgcodecs.imwrite(pngPath, rChannelMat*255);
+                //    if (pngSuccess)
+                //    {
+                //        Debug.Log($"作为备选方案，成功保存为PNG文件: {pngPath}");
+                //        #if UNITY_EDITOR
+                //        AssetDatabase.Refresh();
+                //        #endif
+                //    }
+                //}
             }
             finally
             {

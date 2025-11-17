@@ -267,15 +267,25 @@ namespace ModelTracker
         // 获取行列式
         public float det()
         {
-            return val[0] * (val[4] * val[8] - val[5] * val[7]) -
-                   val[1] * (val[3] * val[8] - val[5] * val[6]) +
-                   val[2] * (val[3] * val[7] - val[4] * val[6]);
+            // 按第一行展开法计算行列式
+            float a11 = val[0], a12 = val[1], a13 = val[2];
+            float a21 = val[3], a22 = val[4], a23 = val[5];
+            float a31 = val[6], a32 = val[7], a33 = val[8];
+
+            // 计算各余子式
+            float M11 = a22 * a33 - a23 * a32;  // 去掉第一行第一列后的2x2行列式
+            float M12 = a21 * a33 - a23 * a31;  // 去掉第一行第二列后的2x2行列式
+            float M13 = a21 * a32 - a22 * a31;  // 去掉第一行第三列后的2x2行列式
+
+            // 按第一行展开计算行列式（符号：+M11 -M12 +M13）
+            return a11 * M11 - a12 * M12 + a13 * M13;
         }
         
         // 计算矩阵的逆
         public Matx33f inv()
         {
             float determinant = det();
+            //Debug.Log("行列式：" + determinant);
             
             // 检查矩阵是否可逆（行列式不为零）
             if (Mathf.Abs(determinant) < 1e-6f)
@@ -287,20 +297,20 @@ namespace ModelTracker
             
             // 计算伴随矩阵
             Matx33f adjugate = new Matx33f();
-            
+
             // 计算代数余子式
-            adjugate.val[0] = val[4] * val[8] - val[5] * val[7];
-            adjugate.val[1] = val[2] * val[7] - val[1] * val[8];
-            adjugate.val[2] = val[1] * val[5] - val[2] * val[4];
-            
-            adjugate.val[3] = val[5] * val[6] - val[3] * val[8];
-            adjugate.val[4] = val[0] * val[8] - val[2] * val[6];
-            adjugate.val[5] = val[2] * val[3] - val[0] * val[5];
-            
-            adjugate.val[6] = val[3] * val[7] - val[4] * val[6];
-            adjugate.val[7] = val[1] * val[6] - val[0] * val[7];
-            adjugate.val[8] = val[0] * val[4] - val[1] * val[3];
-            
+            adjugate.val[0] = (+1) * (val[4] * val[8] - val[5] * val[7]);
+            adjugate.val[1] = (-1) * (val[3] * val[8] - val[5] * val[6]);
+            adjugate.val[2] = (+1) * (val[3] * val[7] - val[4] * val[6]);
+
+            adjugate.val[3] = (-1) * (val[1] * val[8] - val[2] * val[7]);
+            adjugate.val[4] = (+1) * (val[0] * val[8] - val[2] * val[6]);
+            adjugate.val[5] = (-1) * (val[0] * val[7] - val[1] * val[6]);
+
+            adjugate.val[6] = (+1) * (val[1] * val[5] - val[2] * val[4]);
+            adjugate.val[7] = (-1) * (val[0] * val[5] - val[2] * val[3]);
+            adjugate.val[8] = (+1) * (val[0] * val[4] - val[1] * val[3]);
+
             // 转置伴随矩阵
             adjugate = adjugate.t();
             

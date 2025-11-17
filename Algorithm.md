@@ -29,14 +29,22 @@ template的pro方法：
 
 获得当前帧的最近视图，投影对应的三维轮廓点，计算bounding box和ROI
 
-计算重叠的ROI，计算扫描线：dfr的computeScanLine方法。输入的时概率图和roi，
+计算重叠的ROI，计算扫描线：dfr的computeScanLine方法。输入的时概率图和roi，更新_dirs的数据
 
-outiter
-    dfr update
+_calcScanLinesForRows
+
+    根据ROI，N=8个方向，
+
+局部极值优化： out_iter
+
+    dfr.update(dpose, K, this->views[curView].contourPoints3d, innerItrs, alpha, eps)
+
+inner_iter
+
+    non-local的搜索
+    
     
 
-inneriter
-    non-local的搜索
+out_iter
 
-outiter
-    dfr update
+    dfr.update(dpose, K, this->views[curView].contourPoints3d, innerItrs, alpha, eps)
