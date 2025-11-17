@@ -346,7 +346,7 @@ namespace ModelTracker
     public struct CPoint
     {
         public Vector3 center;
-        public Vector3 normal;
+        public Vector3 normal_offset;
     }
 
     // 轮廓点结构

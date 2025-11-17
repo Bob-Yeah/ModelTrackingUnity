@@ -194,7 +194,9 @@ public class CameraRChannelToEXR : MonoBehaviour
                 rChannelMatOrigin.put(0, 0, rChannelData);
 
                 // Unity纹理转成Mat，上下翻转
-                Core.flip(rChannelMatOrigin, rChannelMat, 0);
+                //Core.flip(rChannelMatOrigin, rChannelMat, 0);
+                // 不反转，在边缘采样内部也不翻转
+                rChannelMatOrigin.copyTo(rChannelMat);
                 
                 // 生成时间戳
                 string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");

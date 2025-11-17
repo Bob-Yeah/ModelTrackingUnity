@@ -45,35 +45,74 @@ namespace ModelTracker
                 // 筛选出最大的轮廓（假设是主要物体）
                 MatOfPoint largestContour = null;
                 double maxArea = 0;
-                
+
+                List<Point> finalContourPoints = new List<Point>();
+
+
                 foreach (MatOfPoint contour in contours)
                 {
                     double area = Imgproc.contourArea(contour);
-                    if (area > maxArea)
+
+                    List<Point> _contourPoints = contour.toList();
+
+                    if (area < 0)
                     {
-                        maxArea = area;
-                        largestContour = contour;
+                        _contourPoints.Reverse();
                     }
+
+                    finalContourPoints.AddRange(_contourPoints);
                 }
-                
+
+
+                Debug.Log($"整合轮廓数量: {finalContourPoints.Count}");
+
                 if (largestContour != null)
                 {
                     Debug.Log($"找到最大轮廓，面积: {maxArea}");
-                    
+
                     // 步骤4: 根据轮廓点获取对应深度值
                     Debug.Log("开始从轮廓点获取深度值");
                     List<Vector3> pointCloud = new List<Vector3>();
-                    
+
                     // 获取轮廓点的数组
                     Point[] contourPoints = largestContour.toArray();
                     Debug.Log($"轮廓包含 {contourPoints.Length} 个点");
+
+                    // 平滑轮廓
+                    const int smoothWSZ = 15;
+
+                    // 将轮廓点转换为Mat格式
+                    Mat cimg = new Mat(contourPoints.Length, 2, CvType.CV_32FC1);
+                    for (int i = 0; i < contourPoints.Length; i++)
+                    {
+                        cimg.put(i, 0, new double[] { contourPoints[i].x });
+                        cimg.put(i, 1, new double[] { contourPoints[i].y });
+                    }
+                    
+                    // 平滑处理
+                    Mat smoothed = new Mat();
+                    Imgproc.boxFilter(cimg, smoothed, -1, new Size(smoothWSZ, 1));
+                    Debug.Log($"smoothed mat:{smoothed.size()}");
+                    
+                    Point[] smoothContourPoints = new Point[contourPoints.Length];
+                    for (int i = 0;i < contourPoints.Length;i++)
+                    {
+                        float[] _x = new float[1];
+                        float[] _y = new float[1];
+                        smoothed.get(i, 0, _x);
+                        smoothed.get(i, 1, _y);
+
+                        smoothContourPoints[i] = new Point(_x[0], _y[0]);
+                    }
+                    Debug.Log($"平滑轮廓2 {smoothContourPoints.Length} 个点");
                     
                     // 为了避免处理过多点，进行降采样（可选）
                     int sampleRate = Mathf.Max(1, contourPoints.Length / maxPointCount); // 最多处理maxPointCount个点
                     
                     for (int i = 0; i < contourPoints.Length; i += sampleRate)
                     {
-                        Point pt = contourPoints[i];
+                        //Point pt = contourPoints[i];
+                        Point pt = smoothContourPoints[i];
                         
                         // 确保点在有效范围内
                         if (pt.x >= 0 && pt.x < width && pt.y >= 0 && pt.y < height)
@@ -89,7 +128,7 @@ namespace ModelTracker
                             if (depthValue > 0)
                             {
                                 // 存储像素坐标和深度值
-                                pointCloud.Add(new Vector3((float)pt.x, (float)(height-pt.y), depthValue)); //深度值是真实值
+                                pointCloud.Add(new Vector3((float)pt.x, (float)(pt.y), depthValue)); //深度值是真实值
                             }
                         }
                     }
