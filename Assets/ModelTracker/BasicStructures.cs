@@ -330,6 +330,143 @@ namespace ModelTracker
         }
     }
 
+    // 2x3矩阵类，使用float类型
+    [System.Serializable]
+    public class Matx23f
+    {
+        public float[] val;
+
+        // 默认构造函数，初始化为单位矩阵形式
+        public Matx23f()
+        {
+            val = new float[6];
+            // 初始化为单位矩阵形式（前两列是单位矩阵，最后一列是平移）
+            val[0] = 1; val[1] = 0; val[2] = 0;
+            val[3] = 0; val[4] = 1; val[5] = 0;
+        }
+
+        // 使用指定值初始化
+        public Matx23f(float m00, float m01, float m02,
+                     float m10, float m11, float m12)
+        {
+            val = new float[6] {
+                m00, m01, m02,
+                m10, m11, m12
+            };
+        }
+
+        // 从OpenCV的Mat创建
+        public Matx23f(Mat mat)
+        {
+            val = new float[6];
+            if (mat.rows() == 2 && mat.cols() == 3)
+            {
+                for (int i = 0; i < 2; i++)
+                {
+                    for (int j = 0; j < 3; j++)
+                    {
+                        val[i * 3 + j] = (float)mat.get(i, j)[0];
+                    }
+                }
+            }
+            else
+            {
+                // 如果尺寸不匹配，初始化为单位矩阵形式
+                val[0] = 1; val[1] = 0; val[2] = 0;
+                val[3] = 0; val[4] = 1; val[5] = 0;
+            }
+        }
+
+        // 转换为OpenCV的Mat
+        public Mat ToMat()
+        {
+            Mat mat = new Mat(2, 3, CvType.CV_32FC1);
+            for (int i = 0; i < 2; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                {
+                    mat.put(i, j, val[i * 3 + j]);
+                }
+            }
+            return mat;
+        }
+
+        // 获取元素访问器
+        public float get(int row, int col)
+        {
+            if (row >= 0 && row < 2 && col >= 0 && col < 3)
+                return val[row * 3 + col];
+            throw new System.IndexOutOfRangeException();
+        }
+
+        // 设置元素值
+        public void set(int row, int col, float value)
+        {
+            if (row >= 0 && row < 2 && col >= 0 && col < 3)
+                val[row * 3 + col] = value;
+            else
+                throw new System.IndexOutOfRangeException();
+        }
+
+        // 矩阵乘法（2x3矩阵乘以2x3矩阵，用于仿射变换的组合）
+        public static Matx23f operator *(Matx23f a, Matx23f b)
+        {
+            Matx23f result = new Matx23f();
+            
+            // 计算前两列（线性变换部分）
+            for (int i = 0; i < 2; i++)
+            {
+                for (int j = 0; j < 2; j++)
+                {
+                    result.val[i * 3 + j] = 0;
+                    for (int k = 0; k < 2; k++)
+                    {
+                        result.val[i * 3 + j] += a.val[i * 3 + k] * b.val[k * 3 + j];
+                    }
+                }
+                
+                // 计算第三列（平移部分）
+                result.val[i * 3 + 2] = a.val[i * 3 + 0] * b.val[0 * 3 + 2] + 
+                                      a.val[i * 3 + 1] * b.val[1 * 3 + 2] + 
+                                      a.val[i * 3 + 2];
+            }
+            
+            return result;
+        }
+
+        // 矩阵与点乘法（应用仿射变换）
+        public static Vector2 operator *(Matx23f m, Vector2 v)
+        {
+            Vector2 result = new Vector2();
+            
+            result.x = m.val[0] * v.x + m.val[1] * v.y + m.val[2];
+            result.y = m.val[3] * v.x + m.val[4] * v.y + m.val[5];
+            
+            return result;
+        }
+
+        // 矩阵数乘
+        public static Matx23f operator *(Matx23f m, float scalar)
+        {
+            Matx23f result = new Matx23f();
+            for (int i = 0; i < 6; i++)
+            {
+                result.val[i] = m.val[i] * scalar;
+            }
+            return result;
+        }
+
+        // 字符串表示
+        public override string ToString()
+        {
+            return string.Format(
+                "[{0}, {1}, {2}]",
+                string.Format("[{0}, {1}, {2}]", val[0], val[1], val[2]),
+                string.Format("[{0}, {1}, {2}]", val[3], val[4], val[5])
+            );
+        }
+    }
+
     // 基础数据结构定义
     public struct Pose
     {
@@ -347,58 +484,6 @@ namespace ModelTracker
     {
         public Vector3 center;
         public Vector3 normal_offset;
-    }
-
-    // 轮廓点结构
-    [System.Serializable]
-    public struct ContourPoint
-    {
-        public float w;  // 权重
-        public float x;  // 在扫描线上的位置
-    }
-
-    
-
-    [System.Serializable]
-    public class ScanLine
-    {
-        const int MAX_POINTS_PER_LINE = 3;
-
-        public float y;              // y坐标
-        public Vector2 xdir;         // x方向向量
-        public Vector2 xstart;       // 起点
-        public ContourPoint[] vPoints;  // 轮廓点数组
-        public int nPoints;          // 轮廓点数量
-        public short[] cpIndex;      // 每个x位置对应的最近轮廓点索引
-
-        public ScanLine()
-        {
-            y = 0;
-            xdir = new Vector2(1, 0);
-            xstart = new Vector2(0, 0);
-            vPoints = new ContourPoint[MAX_POINTS_PER_LINE];
-            nPoints = 0;
-            cpIndex = null;
-        }
-
-        // 设置扫描线坐标
-        public void SetCoordinates(Vector2 start, Vector2 end, float y)
-        {
-            this.xstart = start;
-            float len = (float)Mathf.Sqrt((end.x - start.x) * (end.x - start.x) + (end.y - start.y) * (end.y - start.y));
-            xdir = new Vector2((end.x - start.x) / len, (end.y - start.y) / len);
-            this.y = y;
-        }
-
-        // 获取最接近的轮廓点
-        public int GetClosestContourPoint(Vector2 pt, int xsize)
-        {
-            float dot = (pt.x - xstart.x) * xdir.x + (pt.y - xstart.y) * xdir.y;
-            int x = Mathf.RoundToInt(dot);
-            if (x >= 0 && x < xsize)
-                return cpIndex[x];
-            return -1;
-        }
     }
 
 }
