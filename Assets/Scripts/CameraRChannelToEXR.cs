@@ -199,7 +199,7 @@ public class CameraRChannelToEXR : MonoBehaviour
                 rChannelMatOrigin.copyTo(rChannelMat);
                 
                 // 生成时间戳
-                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
                 
                 // 使用EdgeSampler.Sample方法替代原有的处理逻辑
                 Debug.Log("调用EdgeSampler.Sample方法处理深度图");

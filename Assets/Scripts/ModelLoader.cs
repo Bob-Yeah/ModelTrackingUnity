@@ -783,7 +783,6 @@ public class ModelLoader : MonoBehaviour
     
     /// <summary>
     /// 在球面上生成均匀分布的点
-    /// 使用斐波那契球面点分布算法
     /// </summary>
     private List<Vector3> GenerateSphericalPoints(int count, float radius, Vector3 center)
     {
@@ -791,40 +790,12 @@ public class ModelLoader : MonoBehaviour
         ModelTrackerUtils.sampleSphere(ref dirs, count);
         
         List<Vector3> points = new List<Vector3>();
-        
-        if (_includeRotation)
+
+        for (int i = 0; i < count; i++)
         {
-            // 使用斐波那契球面点分布
-            float phi = Mathf.PI * (3 - Mathf.Sqrt(5)); // 黄金角
-            
-            for (int i = 0; i < count; i++)
-            {
-                float y = 1 - (i / (float)(count - 1)) * 2; // y从1到-1
-                float radius_at_y = Mathf.Sqrt(1 - y * y); // 在该y值处的圆半径
-                
-                float theta = phi * i; // 黄金角增量旋转
-                
-                float x = Mathf.Cos(theta) * radius_at_y;
-                float z = Mathf.Sin(theta) * radius_at_y;
-                
-                points.Add(center + new Vector3(x, y, z) * radius);
-            }
+            points.Add(center + dirs[i] * radius);
         }
-        else
-        {
-            // 只在赤道平面上均匀分布
-            float angleStep = 2 * Mathf.PI / count;
-            
-            for (int i = 0; i < count; i++)
-            {
-                float angle = i * angleStep;
-                float x = Mathf.Cos(angle) * radius;
-                float z = Mathf.Sin(angle) * radius;
-                
-                points.Add(center + new Vector3(x, 0, z));
-            }
-        }
-        
+
         return points;
     }
     #endregion
