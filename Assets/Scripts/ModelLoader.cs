@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System;
 using Newtonsoft.Json;
+using ModelTracker;
 
 [ExecuteInEditMode]
 public class ModelLoader : MonoBehaviour
@@ -207,8 +208,6 @@ public class ModelLoader : MonoBehaviour
     [SerializeField] private int _snapshotCount = 12; // 默认12个快照点
     [SerializeField] private float _sphereRadius = 5f; // 默认球体半径
     [SerializeField] private int _textureSize = 1024; // 默认纹理大小
-    [SerializeField] private bool _includeRotation = true; // 是否包含绕Y轴的旋转
-    [SerializeField] private bool _useTransparentBackground = false; // 是否使用透明背景
     [SerializeField] private Color _backgroundColor = Color.black; // 背景颜色
 
     #region Editor功能按钮
@@ -284,18 +283,19 @@ public class ModelLoader : MonoBehaviour
                 EditorUtility.DisplayDialog("提示", "请先加载模型再进行快照渲染", "确定");
             }
             
+            // 生成采样点按钮
+            if (GUILayout.Button("🎯 生成相机采样点"))
+            {
+                loader.GenerateSamplePoints();
+            }
+            
             // 快照设置
-            loader._snapshotCount = EditorGUILayout.IntSlider("快照数量", loader._snapshotCount, 4, 36);
+            loader._snapshotCount = EditorGUILayout.IntSlider("快照数量", loader._snapshotCount, 200, 3000);
             loader._sphereRadius = EditorGUILayout.FloatField("球面半径", loader._sphereRadius);
             loader._textureSize = EditorGUILayout.IntPopup("纹理大小", loader._textureSize, 
                 new string[] { "512x512", "1024x1024", "2048x2048" }, 
                 new int[] { 512, 1024, 2048 });
-            loader._includeRotation = EditorGUILayout.Toggle("包含Y轴旋转", loader._includeRotation);
-            loader._useTransparentBackground = EditorGUILayout.Toggle("透明背景", loader._useTransparentBackground);
-            if (!loader._useTransparentBackground)
-            {
-                loader._backgroundColor = EditorGUILayout.ColorField("背景颜色", loader._backgroundColor);
-            }
+            loader._backgroundColor = EditorGUILayout.ColorField("背景颜色", loader._backgroundColor);
             
             EditorGUILayout.EndVertical();
         }
@@ -541,6 +541,34 @@ public class ModelLoader : MonoBehaviour
         }
     }
     
+    
+    /// <summary>
+    /// 生成模型的采样点
+    /// 只是测试用
+    /// </summary>
+    public void GenerateSamplePoints()
+    {
+        List<Vector3> dirs = null;
+        ModelTrackerUtils.sampleSphere(ref dirs, 3000);
+
+        // 为每个反投影点创建小球
+        for (int i = 0; i < dirs.Count; i++)
+        {
+            Vector3 worldPoint = dirs[i];
+            GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            sphere.transform.position = new Vector3(worldPoint.x, worldPoint.y, worldPoint.z); //!opencv的相机坐标系y轴朝下;
+            sphere.transform.localScale = new Vector3(0.001f, 0.001f, 0.001f);
+
+            // 设置红色材质以便于识别
+            Renderer renderer = sphere.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                renderer.sharedMaterial = new Material(Shader.Find("Standard"));
+                renderer.sharedMaterial.color = Color.blue;
+            }
+        }
+    }
+
     /// <summary>
     /// 渲染模型快照
     /// </summary>
@@ -552,13 +580,13 @@ public class ModelLoader : MonoBehaviour
             Debug.LogError("没有加载的模型可以渲染快照");
             return;
         }
-        
+
         // 创建保存目录
         if (!Directory.Exists(saveDirectory))
         {
             Directory.CreateDirectory(saveDirectory);
         }
-        
+
         // 创建Assets资源目录用于保存深度图
         string assetsDepthDir = Path.Combine(Application.dataPath, "DepthMaps");
         if (!Directory.Exists(assetsDepthDir))
@@ -566,7 +594,7 @@ public class ModelLoader : MonoBehaviour
             Directory.CreateDirectory(assetsDepthDir);
             Debug.Log($"创建深度图资源目录: {assetsDepthDir}");
         }
-        
+
         // 计算模型的中心点
         Renderer[] renderers = _loadedModel.GetComponentsInChildren<Renderer>();
         if (renderers.Length == 0)
@@ -574,95 +602,95 @@ public class ModelLoader : MonoBehaviour
             Debug.LogError("模型没有渲染器组件");
             return;
         }
-        
+
         Bounds bounds = renderers[0].bounds;
         foreach (Renderer renderer in renderers)
         {
             bounds.Encapsulate(renderer.bounds);
         }
-        
+
         Vector3 modelCenter = bounds.center;
         float modelSize = Mathf.Max(bounds.size.x, Mathf.Max(bounds.size.y, bounds.size.z));
-        
+
         // 调整球体半径以适应模型大小
         float effectiveRadius = _sphereRadius;
-        
+
         // 创建临时相机
         GameObject cameraObj = new GameObject("SnapshotCamera");
         Camera snapshotCamera = cameraObj.AddComponent<Camera>();
-        
+
         // 首先设置默认FOV，后面可能会被标定数据覆盖
         snapshotCamera.fieldOfView = 45f;
-        snapshotCamera.backgroundColor = _useTransparentBackground ? new Color(0, 0, 0, 0) : _backgroundColor;
-        snapshotCamera.clearFlags = _useTransparentBackground ? CameraClearFlags.SolidColor : CameraClearFlags.SolidColor;
+        snapshotCamera.backgroundColor = _backgroundColor;
+        snapshotCamera.clearFlags = CameraClearFlags.SolidColor;
         snapshotCamera.targetTexture = new RenderTexture(_textureSize, _textureSize, 24);
-        
+
         // 尝试应用相机标定参数
         // ApplyCameraCalibration(snapshotCamera);
-        
+
         // 创建RenderTexture和Texture2D用于截图
         RenderTexture renderTexture = new RenderTexture(_textureSize, _textureSize, 24);
-        Texture2D screenshotTexture = new Texture2D(_textureSize, _textureSize, _useTransparentBackground ? TextureFormat.RGBA32 : TextureFormat.RGB24, false);
-        
+        Texture2D screenshotTexture = new Texture2D(_textureSize, _textureSize, TextureFormat.RGB24, false);
+
         // 创建深度渲染所需的纹理
         RenderTexture depthRenderTexture = new RenderTexture(_textureSize, _textureSize, 24, RenderTextureFormat.ARGB32);
         // 使用32位浮点型纹理存储深度信息
         Texture2D depthTexture = new Texture2D(_textureSize, _textureSize, TextureFormat.RFloat, false);
-        
+
         // 保存原始材质并创建临时的深度着色器材质
         Dictionary<Renderer, Material[]> originalMaterials = new Dictionary<Renderer, Material[]>();
         Material depthMaterial = CreateDepthMaterial();
-        
+
         // 替换所有渲染器的材质为深度材质
         foreach (Renderer renderer in _loadedModel.GetComponentsInChildren<Renderer>())
-        {            
+        {
             originalMaterials[renderer] = renderer.sharedMaterials;
             renderer.sharedMaterials = new Material[] { depthMaterial };
         }
-        
+
         // 生成球面上的均匀分布点
         List<Vector3> cameraPositions = GenerateSphericalPoints(_snapshotCount, effectiveRadius, modelCenter);
-        
+
         Debug.Log($"开始渲染{cameraPositions.Count}个快照和深度图...");
-        
+
         for (int i = 0; i < cameraPositions.Count; i++)
         {
             // 设置相机位置和朝向
             cameraObj.transform.position = cameraPositions[i];
             cameraObj.transform.LookAt(modelCenter);
-            
+
             // 渲染到RenderTexture（彩色图）
             RenderTexture.active = renderTexture;
             snapshotCamera.targetTexture = renderTexture;
             snapshotCamera.Render();
-            
+
             // 读取像素数据
             screenshotTexture.ReadPixels(new Rect(0, 0, renderTexture.width, renderTexture.height), 0, 0);
             screenshotTexture.Apply();
-            
+
             // 保存为PNG文件
             byte[] bytes = screenshotTexture.EncodeToPNG();
             string fileName = $"snapshot_{i.ToString()}.png";
             string filePath = Path.Combine(saveDirectory, fileName);
             File.WriteAllBytes(filePath, bytes);
-            
+
             Debug.Log($"快照已保存: {filePath}");
-            
+
             // 渲染深度图
             RenderDepthMap(snapshotCamera, depthRenderTexture, depthTexture);
-            
+
             // 保存深度图到Assets资源目录
             string depthFileName = $"depth_{i.ToString()}.asset";
             string depthFilePath = Path.Combine(assetsDepthDir, depthFileName);
             SaveDepthTextureAsAsset(depthTexture, depthFileName, assetsDepthDir);
         }
-        
+
         // 恢复原始材质
         foreach (var kvp in originalMaterials)
-        {            
+        {
             kvp.Key.sharedMaterials = kvp.Value;
         }
-        
+
         // 清理资源
         RenderTexture.active = null;
         DestroyImmediate(renderTexture);
@@ -671,10 +699,10 @@ public class ModelLoader : MonoBehaviour
         DestroyImmediate(depthTexture);
         DestroyImmediate(depthMaterial);
         DestroyImmediate(cameraObj);
-        
+
         Debug.Log($"所有快照和深度图渲染完成，共{cameraPositions.Count}个文件保存在: {saveDirectory}");
         Debug.Log($"深度图资源保存在: {assetsDepthDir}");
-        
+
 #if UNITY_EDITOR
         // 刷新AssetDatabase以显示新创建的深度图资源
         UnityEditor.AssetDatabase.Refresh();
@@ -759,6 +787,9 @@ public class ModelLoader : MonoBehaviour
     /// </summary>
     private List<Vector3> GenerateSphericalPoints(int count, float radius, Vector3 center)
     {
+        List<Vector3> dirs = null;
+        ModelTrackerUtils.sampleSphere(ref dirs, count);
+        
         List<Vector3> points = new List<Vector3>();
         
         if (_includeRotation)

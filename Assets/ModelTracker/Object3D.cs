@@ -43,7 +43,7 @@ namespace ModelTracker
             {
                 CPoint cp = new CPoint();
                 cp.center = new Vector3((float)i / 10, 0, 0);
-                cp.normal = new Vector3(0, 0, 1);
+                cp.normal_offset = new Vector3(0, 0, 1);
                 view.contourPoints3d.Add(cp);
             }
 

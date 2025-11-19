@@ -64,6 +64,7 @@ namespace ModelTracker
 
             public void resize(int rows, int cols)
             {
+                if (lines == null) lines = new List<ScanLine>();
                 lines.Clear();
                 _cpIndexBuf = new Mat(rows, cols, CvType.CV_16SC1);
                 for (int y = 0; y < rows; y++)
@@ -255,8 +256,9 @@ namespace ModelTracker
 
             // 使用C#的Parallel.For进行并行处理
             System.Threading.Tasks.Parallel.For(0, N, i =>
+            //for (int i = 0; i < N; i++)
             {
-                double theta = 180.0 / N * i;
+                double theta = 180.0 / (N-1) * i;
                 
                 // 获取旋转矩阵
                 Vector2 opencvCenter = new Vector2(center.x, center.y);
@@ -269,13 +271,15 @@ namespace ModelTracker
                 // 转换角点
                 // 将Vector2列表转换为Point2f数组
                 Point[] cornersArray = new Point[corners.Count];
-                for (int j = 0; j < corners.Count; j++)
-                {
-                    cornersArray[j] = new Point(corners[j].x, corners[j].y);
-                }
+                
                 
                 // 创建输出数组
                 Point[] AcornersArray = new Point[corners.Count];
+                for (int j = 0; j < corners.Count; j++)
+                {
+                    cornersArray[j] = new Point(corners[j].x, corners[j].y);
+                    AcornersArray[j] = new Point(0, 0);
+                }
                 Core.transform(new MatOfPoint2f(cornersArray), new MatOfPoint2f(AcornersArray), rotationMatrix);
                 
                 // 将Point2f数组转换回Vector2列表
@@ -286,7 +290,7 @@ namespace ModelTracker
                 }
                 
                 // 获取边界框
-                OpenCVForUnity.CoreModule.Rect droi = getBoundingBox2D(Acorners);
+                OpenCVForUnity.CoreModule.Rect droi = ModelTrackerUtils.getBoundingBox2D(Acorners);
                 
                 // 更新变换矩阵
                 Matx23f translationMatrix = new Matx23f(1, 0, -droi.x, 0, 1, -droi.y);
@@ -295,31 +299,35 @@ namespace ModelTracker
                 // 应用仿射变换
                 Mat dirProb = new Mat();
                 Imgproc.warpAffine(prob_, dirProb, A.ToMat(), droi.size(), Imgproc.INTER_LINEAR, Core.BORDER_CONSTANT, new Scalar(0));
-                
+                // 翻转后的概率图，Mat格式保存到文件dirProb
+                // 调用opencvforunity的Imgproc.imwrite方法保存到文件
+                // OpenCVForUnity.ImgcodecsModule.Imgcodecs.imwrite("dirProb_" + i + ".png", dirProb*255.0f);
+
                 // 计算方向向量
                 theta = theta / 180.0 * Math.PI;
                 Vector2 dir = new Vector2((float)Math.Cos(theta), (float)Math.Sin(theta));
-                
+
                 // 处理方向数据（注意线程安全问题）
                 lock (_dirs) // 使用锁确保线程安全
                 {
                     DirData positiveDir = _dirs[i];
                     DirData negativeDir = _dirs[i + N];
-                    
+
                     // 这里需要实现invertAffine和_calcScanLinesForRows方法
                     // 假设这些方法已经存在于类中
                     Matx23f invA = invertAffine(A);
                     _calcScanLinesForRows(dirProb, ref positiveDir, ref negativeDir, invA);
-                    
+
                     // 设置方向向量
                     positiveDir.dir = dir;
                     negativeDir.dir = -dir;
-                    
+
                     // 更新_dirs中的数据
                     _dirs[i] = positiveDir;
                     _dirs[i + N] = negativeDir;
                 }
             });
+            //};
 
             // 归一化轮廓点权重
             float wMax = 0;
@@ -357,7 +365,9 @@ namespace ModelTracker
                                 {
                                     if (i < dirLine.vPoints.Count)
                                     {
-                                        dirLine.vPoints[i].w /= wMax;
+                                        var cp = dirLine.vPoints[i];
+                                        cp.w /= wMax;
+                                        dirLine.vPoints[i] = cp;
                                     }
                                 }
                             }
@@ -374,7 +384,7 @@ namespace ModelTracker
                 {
                     _dirIndex.Add(0);
                 }
-                
+
                 for (int i = 0; i < _dirIndex.Count; ++i)
                 {
                     float theta = i * (float)Math.PI / 180f - (float)Math.PI;
@@ -432,36 +442,9 @@ namespace ModelTracker
             return new Matx23f(m00, m01, v0, m10, m11, v1);
         }
 
-        // 获取点集的边界框
-        static public OpenCVForUnity.CoreModule.Rect getBoundingBox2D(List<Vector2> points)
-        {
-            if (points == null || points.Count == 0)
-            {
-                return new OpenCVForUnity.CoreModule.Rect(0, 0, 0, 0);
-            }
+        
 
-            float minX = float.MaxValue;
-            float minY = float.MaxValue;
-            float maxX = float.MinValue;
-            float maxY = float.MinValue;
-
-            foreach (var point in points)
-            {
-                minX = Mathf.Min(minX, point.x);
-                minY = Mathf.Min(minY, point.y);
-                maxX = Mathf.Max(maxX, point.x);
-                maxY = Mathf.Max(maxY, point.y);
-            }
-
-            int x = Mathf.FloorToInt(minX);
-            int y = Mathf.FloorToInt(minY);
-            int width = Mathf.CeilToInt(maxX - minX);
-            int height = Mathf.CeilToInt(maxY - minY);
-
-            return new OpenCVForUnity.CoreModule.Rect(x, y, width, height);
-        }
-
-        // 计算扫描线（需要根据实际实现补充）
+        // 计算扫描线
         private void _calcScanLinesForRows(Mat dirProb, ref DirData positiveDir, ref DirData negativeDir, Matx23f invA)
         {
             const int gaussWindowSizeHalf = 3;
@@ -470,7 +453,14 @@ namespace ModelTracker
             Mat edgeProb = new Mat();
             Imgproc.Sobel(dirProb, edgeProb, CvType.CV_32F, 1, 0, 7);
 
+            // Debug:保存旋转后的边缘图到文件
+            //Debug.Log("保存旋转后的边缘图");
+            //string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
+            //OpenCVForUnity.ImgcodecsModule.Imgcodecs.imwrite($"edgeProb_{timestamp}.png", edgeProb);
+            //OpenCVForUnity.ImgcodecsModule.Imgcodecs.imwrite($"edgeProb_{timestamp}_m.png", -edgeProb);
+            
             // 初始化方向数据的坐标
+            // x轴正方向，旋转回去，原点和终点在的地方
             Vector2 O = transA(new Vector2(0f, 0f), invA.val);
             Vector2 P = transA(new Vector2(0f, (float)(dirProb.rows() - 1)), invA.val);
             positiveDir.setCoordinates(O, P);
@@ -486,7 +476,7 @@ namespace ModelTracker
             float[] negData = new float[dirProb.cols()]; // 后半部分
             _LineBuilder buildLine = new _LineBuilder(dirProb.cols());
 
-            const int xend = dirProb.cols() - 1;
+            int xend = dirProb.cols() - 1;
             for (int y = 0; y < dirProb.rows(); ++y)
             {
                 // 获取当前行的扫描线引用
@@ -501,15 +491,8 @@ namespace ModelTracker
 
                 // 获取边缘概率数据
                 Mat rowMat = edgeProb.row(y);
-                byte[] rowData = new byte[rowMat.cols() * rowMat.elemSize()];
-                rowMat.get(0, 0, rowData);
                 float[] ep = new float[rowMat.cols()];
-                // 将byte数组转换为float数组（假设是32F类型）
-                for (int i = 0; i < rowMat.cols(); i++)
-                {
-                    int index = i * 4; // 每个float占4个字节
-                    ep[i] = BitConverter.ToSingle(rowData, index);
-                }
+                rowMat.get(0, 0, ep);
 
                 // 填充正负方向数据
                 for (int x = 0; x < dirProb.cols(); ++x)
@@ -539,6 +522,11 @@ namespace ModelTracker
         public void visualizeScanLines(Mat mat)
         {
             // 可视化扫描线
+            Debug.Log("_dirs:" + _dirs.Count);
+            foreach (var _dir in _dirs)
+            {
+                Debug.Log("_dir:" + _dir.ystart);
+            }
             
         }
 

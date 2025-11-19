@@ -100,6 +100,11 @@ namespace ModelTracker
             val[6] = 0; val[7] = 0; val[8] = 1;
         }
 
+        public static Matx33f eye()
+        {
+            return new Matx33f(1, 0, 0, 0, 1, 0, 0, 0, 1);
+        }
+
         // 使用指定值初始化
         public Matx33f(float m00, float m01, float m02,
                      float m10, float m11, float m12,

@@ -275,6 +275,7 @@ public class CameraRChannelToEXR : MonoBehaviour
                 foreach (CPoint cPoint in sampledPoints)
                 {
                     worldPoints.Add(cPoint.center);
+                    worldPoints.Add(cPoint.normal_offset);
                 }
                 
                 Debug.Log($"成功通过EdgeSampler获取 {worldPoints.Count} 个3D点");
@@ -288,8 +289,9 @@ public class CameraRChannelToEXR : MonoBehaviour
                     ClearPointCloudSpheres();
                         
                     // 为每个反投影点创建小球
-                    foreach (Vector3 worldPoint in worldPoints)
+                    for(int i = 0; i < worldPoints.Count; i++)
                     {
+                        Vector3 worldPoint = worldPoints[i];
                         GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
                         sphere.transform.position = new Vector3(worldPoint.x, worldPoint.y, worldPoint.z); //!opencv的相机坐标系y轴朝下;
                         sphere.transform.localScale = new Vector3(sphereSize, sphereSize, sphereSize);
@@ -299,7 +301,10 @@ public class CameraRChannelToEXR : MonoBehaviour
                         if (renderer != null)
                         {
                             renderer.sharedMaterial = new Material(Shader.Find("Standard"));
+                            if (i % 2 == 0)
                             renderer.sharedMaterial.color = Color.red;
+                            else
+                            renderer.sharedMaterial.color = Color.green;
                         }
                         
                         // 将小球添加到列表中以便后续清除

@@ -7,8 +7,7 @@ using System.IO;
 
 namespace ModelTracker
 {
-    // 模板类，包含3D模型的多视图表示和pro1优化方法
-    
+    // 模板类，包含3D模型的多视图表示
     [System.Serializable]
     public class Templates
     {
@@ -20,7 +19,7 @@ namespace ModelTracker
         // Build函数，创作不同视角的模板
         // 可以利用Unity的其他功能进行离线的制作
         // 这里不做实现，需要进行额外的加载，这里只做模板文件所需内容的分析
-        public void Build(List<DView> views)
+        public void Build(List<DView> views, Vector3 modelCenter)
         {
             // 简化实现
             this.views = new List<DView>(views);

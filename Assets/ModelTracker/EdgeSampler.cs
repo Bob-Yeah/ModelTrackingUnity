@@ -66,20 +66,22 @@ namespace ModelTracker
 
                 Debug.Log($"整合轮廓数量: {finalContourPoints.Count}");
 
-                if (largestContour != null)
+                if (finalContourPoints.Count > 3)
                 {
-                    Debug.Log($"找到最大轮廓，面积: {maxArea}");
+                    //Debug.Log($"找到最大轮廓，面积: {maxArea}");
 
                     // 步骤4: 根据轮廓点获取对应深度值
                     Debug.Log("开始从轮廓点获取深度值");
                     List<Vector3> pointCloud = new List<Vector3>();
+                    List<Vector3> smoothPointCloud = new List<Vector3>();
 
                     // 获取轮廓点的数组
-                    Point[] contourPoints = largestContour.toArray();
+                    //Point[] contourPoints = largestContour.toArray();
+                    Point[] contourPoints = finalContourPoints.ToArray();
                     Debug.Log($"轮廓包含 {contourPoints.Length} 个点");
 
                     // 平滑轮廓
-                    const int smoothWSZ = 15;
+                    const int smoothWSZ = 15 , hwsz = smoothWSZ / 2;;
 
                     // 将轮廓点转换为Mat格式
                     Mat cimg = new Mat(contourPoints.Length, 2, CvType.CV_32FC1);
@@ -91,7 +93,7 @@ namespace ModelTracker
                     
                     // 平滑处理
                     Mat smoothed = new Mat();
-                    Imgproc.boxFilter(cimg, smoothed, -1, new Size(smoothWSZ, 1));
+                    Imgproc.boxFilter(cimg, smoothed, -1, new Size(1, smoothWSZ));
                     Debug.Log($"smoothed mat:{smoothed.size()}");
                     
                     Point[] smoothContourPoints = new Point[contourPoints.Length];
@@ -111,8 +113,8 @@ namespace ModelTracker
                     
                     for (int i = 0; i < contourPoints.Length; i += sampleRate)
                     {
-                        //Point pt = contourPoints[i];
-                        Point pt = smoothContourPoints[i];
+                        Point pt = contourPoints[i];
+                        Point pt_s = smoothContourPoints[i];
                         
                         // 确保点在有效范围内
                         if (pt.x >= 0 && pt.x < width && pt.y >= 0 && pt.y < height)
@@ -120,7 +122,7 @@ namespace ModelTracker
                             // 从原始深度图Mat获取深度值（32位浮点）
                             double[] pixelValue = rChannelMat.get((int)pt.y, (int)pt.x);
                             float depthValue = (float)pixelValue[0];
-                            Debug.Log($"采样轮廓 {pt.y}, {pt.x}, depth: {depthValue}");
+                            Debug.Log($"采样轮廓 {pt.y}, {pt.x}, smooth: {pt_s.y}, {pt_s.x}, depth: {depthValue}");
 
                             //测试用
                             maskMat.put((int)pt.y, (int)pt.x, 125);
@@ -129,6 +131,17 @@ namespace ModelTracker
                             {
                                 // 存储像素坐标和深度值
                                 pointCloud.Add(new Vector3((float)pt.x, (float)(pt.y), depthValue)); //深度值是真实值
+                                // 2D normal
+                                Vector2 n = new Vector2();
+                                n += new Vector2((float)(smoothContourPoints[(i + contourPoints.Length - hwsz) % contourPoints.Length].x - pt_s.x), (float)(smoothContourPoints[(i + contourPoints.Length - hwsz) % contourPoints.Length].y - pt_s.y));
+                                n += new Vector2((float)(pt_s.x - smoothContourPoints[(i + hwsz) % contourPoints.Length].x), (float)(pt_s.y - smoothContourPoints[(i + hwsz) % contourPoints.Length].y));
+                                n.Normalize();
+                                n = new Vector2(n.y, -n.x);
+                                Vector2 offset_p = new Vector2((float)(pt.x + n.x), (float)(pt.y + n.y));
+
+                                // 存储平滑后的像素坐标和深度值
+                                smoothPointCloud.Add(new Vector3((float)offset_p.x, (float)(offset_p.y), depthValue)); //深度值是真实值
+                                
                             }
                         }
                     }
@@ -161,6 +174,35 @@ namespace ModelTracker
                         {
                             Debug.LogError($"无法保存二值化mask: {maskFullPath}");
                         }
+
+
+                        Mat mat_vis_cp = new Mat(maskMat.rows(), maskMat.cols(), CvType.CV_8UC3);
+                        foreach (var p2d in smoothContourPoints)
+                        {
+                            Imgproc.circle(mat_vis_cp, new Point((int)p2d.x, (int)p2d.y), 1, new Scalar(255, 255, 255), -1);
+                        }
+
+                        foreach (var p2d in contourPoints)
+                        {
+                            Imgproc.circle(mat_vis_cp, new Point((int)p2d.x, (int)p2d.y), 1, new Scalar(0, 0, 255), -1);
+                        }
+
+                        // 生成时间戳
+                        string maskFileName2 = $"mask_smooth_{timestamp}.png";
+                        string maskFullPath2 = Path.Combine(savePath, maskFileName2);
+
+                        bool maskSaveSuccess2 = OpenCVForUnity.ImgcodecsModule.Imgcodecs.imwrite(maskFullPath2, mat_vis_cp);
+                        if (maskSaveSuccess2)
+                        {
+                            Debug.Log($"平滑轮廓mask已成功保存为PNG: {maskFullPath2}");
+#if UNITY_EDITOR
+                            UnityEditor.AssetDatabase.Refresh();
+#endif
+                        }
+                        else
+                        {
+                            Debug.LogError($"无法保存二值化mask: {maskFullPath}");
+                        }
                     }
 
 
@@ -170,16 +212,20 @@ namespace ModelTracker
                     // 创建投影器
                     Projector prj = new Projector(K, R, t);
                     
-                    foreach (Vector3 point in pointCloud)
+                    for (int i = 0; i< pointCloud.Count; i++)
                     {
+                        Vector3 point = pointCloud[i];
+                        Vector3 s_point = smoothPointCloud[i];
                         // 使用Projector类的Unproject方法将2D点反投影到3D空间
                         Vector3 worldPoint = prj.Unproject(point.x, point.y, point.z); //x,y 是像素的位置
+
+                        Vector3 worldPoint_smooth = prj.Unproject(s_point.x, s_point.y, s_point.z); //x,y 是像素的位置
                         
                         // 创建CPoint并添加到结果列表
                         CPoint cPoint = new CPoint();
                         cPoint.center = worldPoint;
                         // 暂时不计算法线，可以根据需要添加法线计算逻辑
-                        cPoint.normal = Vector3.up; // 默认法线向上
+                        cPoint.normal_offset = worldPoint_smooth; // 默认法线向上
                         result.Add(cPoint);
                     }
                     
