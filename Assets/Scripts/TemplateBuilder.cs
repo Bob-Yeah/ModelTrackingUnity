@@ -142,12 +142,12 @@ public class TemplateBuilder : MonoBehaviour
         {
 
             RenderExecute(ref cameraObj, cameraPos[i], modelCenter, depthRenderTexture, depthTexture);
-            (List<CPoint> sampledPoints, Matx33f R) = SamplingAndUnproject(cameraObj, depthTexture, K);
+            (List<CPoint> sampledPoints, Matx33f _R) = SamplingAndUnproject(cameraObj, depthTexture, K);
 
             views.Add(new DView()
             {
                 viewDir = (cameraPos[i] - modelCenter).normalized,
-                R = R,
+                R = _R.inv(),
                 contourPoints3d = sampledPoints
             });
         }

@@ -21,8 +21,9 @@ public class TemplateRuntime : MonoBehaviour
     public bool IsTemplateLoading { get; private set; } = false;
     public bool IsTemplateLoaded { get; private set; } = false;
     
-    // 加载完成事件
-    public event Action OnTemplateLoadComplete;
+    // 用于存储点云可视化的小球对象
+    private List<GameObject> pointCloudSpheres = new List<GameObject>();
+    
 
     void Awake()
     {
@@ -78,25 +79,19 @@ public class TemplateRuntime : MonoBehaviour
                 // 使用新的LoadFromJson方法，避免重复文件读取
                 tempTemplate.LoadFromJson(jsonData);
                 
-                // 回到主线程设置ModelTemplate
-                UnityMainThreadDispatcher.Instance().Enqueue(() => {
-                    ModelTemplate = tempTemplate;
-                    IsTemplateLoading = false;
-                    IsTemplateLoaded = true;
-                    Debug.Log("模板文件加载完成");
-                    
-                    // 触发完成事件
-                    OnTemplateLoadComplete?.Invoke();
-                });
+                ModelTemplate = tempTemplate;
+                IsTemplateLoading = false;
+                IsTemplateLoaded = true;
+                Debug.Log("模板文件加载完成");
+
+                
             }
             catch (Exception e)
             {
                 loadException = e;
-                UnityMainThreadDispatcher.Instance().Enqueue(() => {
-                    Debug.LogError($"加载模板文件失败: {e.Message}");
+                Debug.LogError($"加载模板文件失败: {e.Message}");
                     Debug.LogError($"堆栈跟踪: {e.StackTrace}");
                     IsTemplateLoading = false;
-                });
             }
         });
         
@@ -109,11 +104,42 @@ public class TemplateRuntime : MonoBehaviour
 
     public void FindNearestView()
     {
+        if (!IsTemplateLoaded)
+        {
+            Debug.LogError("模板文件未加载完成");
+            return;
+        }
+
         // 找到最近的视图
-
+        Vector3 currentDir = TrackerCamera.transform.position - ModelTemplate.modelCenter;
+        int DViewIndex = ModelTemplate.viewIndex.GetViewInDir(currentDir.normalized);
+        if (DViewIndex < 0)
+        {
+            Debug.LogError("未找到最近的视图");
+            return;
+        }
         // 打印最近的视图
+        
+        ModelTracker.DView currentDView = ModelTemplate.views[DViewIndex];
+        
+        Debug.Log($"最近的视图索引: {DViewIndex}, Current Dir: {currentDir.normalized} FindNearestDir: {currentDView.viewDir}");
 
-        // 更新档期那
+        // 创建DebugObject
+        pointCloudSpheres.Clear();
+        foreach (var point in currentDView.contourPoints3d)
+        {
+            GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            sphere.transform.position = ModelTemplate.modelCenter + point.center;
+            sphere.transform.localScale = Vector3.one * 0.001f;
+            // 设置红色材质以便于识别
+            Renderer renderer = sphere.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                renderer.sharedMaterial = new Material(Shader.Find("Standard"));
+                renderer.sharedMaterial.color = Color.red;
+            }
+            pointCloudSpheres.Add(sphere);
+        }
     }
     
 

@@ -174,6 +174,7 @@ namespace ModelTracker
                 match.Dispose();
             uvDirMat.Dispose();
             indices.Dispose();
+            Debug.Log("views building finished");
         }
 
         // 获取指定方向的视图

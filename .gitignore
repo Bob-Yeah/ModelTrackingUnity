@@ -6,7 +6,8 @@ Temp/
 obj/
 Build/
 Logs/
-Assets/DepthMaps/
+Assets/DepthMaps/*.png
+Assets/DepthMaps/*.png.meta
 Assets/StreamingAssets/ModelTemplates/*.png
 Assets/StreamingAssets/ModelTemplates/*.png.meta
 

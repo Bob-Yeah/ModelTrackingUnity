@@ -558,6 +558,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1101179116}
   - component: {fileID: 1101179115}
+  - component: {fileID: 1101179117}
   m_Layer: 0
   m_Name: Camera
   m_TagString: Untagged
@@ -631,6 +632,43 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1101179117
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1101179113}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: af22bb0232fdb4c4f971f58f72a26f84, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  TrackerCam: {fileID: 1101179115}
+  currentT: {x: 0, y: 0, z: 0}
+  lastT: {x: 0, y: 0, z: 0}
+  currentR:
+    val:
+    - 1
+    - 0
+    - 0
+    - 0
+    - 1
+    - 0
+    - 0
+    - 0
+    - 1
+  lastR:
+    val:
+    - 1
+    - 0
+    - 0
+    - 0
+    - 1
+    - 0
+    - 0
+    - 0
+    - 1
 --- !u!1 &1185777293
 GameObject:
   m_ObjectHideFlags: 0
@@ -1166,6 +1204,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1842108579}
   - component: {fileID: 1842108580}
+  - component: {fileID: 1842108581}
   m_Layer: 0
   m_Name: Template
   m_TagString: Untagged
@@ -1205,6 +1244,18 @@ MonoBehaviour:
     views: []
   TemplatePath: Assets/DepthMaps/Squirrel.json
   TrackerCamera: {fileID: 1101179115}
+--- !u!114 &1842108581
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1842108578}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 42864edc1abe2a94888f7a76ada261fe, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &1957494654
 GameObject:
   m_ObjectHideFlags: 0
@@ -1698,7 +1749,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 663.6, y: -21.74}
+  m_AnchoredPosition: {x: 663.6, y: -18.08}
   m_SizeDelta: {x: 160, y: 30}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &2140578741
@@ -1744,7 +1795,19 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 2140578742}
   m_OnClick:
     m_PersistentCalls:
-      m_Calls: []
+      m_Calls:
+      - m_Target: {fileID: 1842108580}
+        m_TargetAssemblyTypeName: TemplateRuntime, Assembly-CSharp
+        m_MethodName: FindNearestView
+        m_Mode: 1
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 0
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
 --- !u!114 &2140578742
 MonoBehaviour:
   m_ObjectHideFlags: 0
