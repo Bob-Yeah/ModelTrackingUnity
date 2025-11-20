@@ -23,6 +23,8 @@ public class TemplateBuilder : MonoBehaviour
     [SerializeField] private int _contourPointCountByView = 200; // 默认每个视图200个轮廓点
 
     [SerializeField] private float _sphereRadiusScale = 2.5f; // 默认球体半径
+    [SerializeField] private float _sphereRadius = 0.25f; // 默认球体半径
+
     [SerializeField] private int _textureSize = 1024; // 默认纹理大小
     [SerializeField] private Color _backgroundColor = Color.black; // 背景颜色
     
@@ -35,11 +37,35 @@ public class TemplateBuilder : MonoBehaviour
     public string savePath = "Assets/DepthMaps";
     [Tooltip("文件名前缀")]
     public string fileNamePrefix = "r_channel";
+
+    [Tooltip("模型文件名")]
+    public string modelFileName = "Squirrel.json";
+
     public bool SaveImages = true;
+    public bool DebugPoints = true;
+
+    // 用于存储点云可视化的小球对象
+    private List<GameObject> pointCloudSpheres = new List<GameObject>();
+    
+    /// <summary>
+    /// 清除之前创建的点云小球
+    /// </summary>
+    public void ClearPointCloudSpheres()
+    {
+        foreach (GameObject sphere in pointCloudSpheres)
+        {
+            if (sphere != null)
+            {
+                DestroyImmediate(sphere);
+            }
+        }
+        pointCloudSpheres.Clear();
+        Debug.Log("已清除之前的点云小球");
+    }
 
     public void GenerateTemplate()
     {
-        if (targetModel == null && targetModel.GetComponent<MeshFilter>() == null 
+        if (targetModel == null && targetModel.GetComponent<MeshFilter>() == null
             && targetModel.transform.position == Vector3.zero)
         {
             Debug.LogWarning("targetModel的设置有问题，未设置、下面没有MeshFilter、不处在原点都不正确");
@@ -67,12 +93,12 @@ public class TemplateBuilder : MonoBehaviour
         float modelSize = Mathf.Max(bounds.size.x, Mathf.Max(bounds.size.y, bounds.size.z));
 
         // 调整球体半径以适应模型大小
-        float effectiveRadius = modelSize / 2.0f * _sphereRadiusScale;
+        float effectiveRadius = Mathf.Max(modelSize / 2.0f * _sphereRadiusScale, _sphereRadius);
 
         // 创建临时相机
         GameObject cameraObj = new GameObject("SnapshotCamera");
         Camera snapshotCamera = cameraObj.AddComponent<Camera>();
-        
+
         // 设置相机性质
         SetupCamera(ref snapshotCamera, targetLayer);
 
@@ -106,13 +132,39 @@ public class TemplateBuilder : MonoBehaviour
             0, 0, 1
         );
 
+        // 清除之前的小球
+        ClearPointCloudSpheres();
+
         // 设置不同的相机位置，开始渲染
         List<Vector3> cameraPos = GenerateSphericalPoints(_snapshotCount, effectiveRadius, modelCenter);
+        List<DView> views = new List<DView>();
         for (int i = 0; i < _snapshotCount; ++i)
         {
-            RenderExecute(ref cameraObj,cameraPos[i], modelCenter, depthRenderTexture, depthTexture);
 
+            RenderExecute(ref cameraObj, cameraPos[i], modelCenter, depthRenderTexture, depthTexture);
+            (List<CPoint> sampledPoints, Matx33f R) = SamplingAndUnproject(cameraObj, depthTexture, K);
+
+            views.Add(new DView()
+            {
+                viewDir = (cameraPos[i] - modelCenter).normalized,
+                R = R,
+                contourPoints3d = sampledPoints
+            });
         }
+
+        Debug.Log($"成功创建 {pointCloudSpheres.Count} 个小球来可视化点云");
+
+        // 创建模板
+        ModelTracker.Templates modelT = new ModelTracker.Templates()
+        {
+            modelCenter = modelCenter,
+            views = views
+        };
+        
+        // 保存
+        string fullPath = Path.Combine(savePath, modelFileName);
+        
+        modelT.Save(fullPath);
 
         // 恢复原始材质
         foreach (var kvp in originalMaterials)
@@ -122,12 +174,10 @@ public class TemplateBuilder : MonoBehaviour
 
         // 清理资源
         RenderTexture.active = null;
+        DestroyImmediate(cameraObj);
         DestroyImmediate(depthRenderTexture);
         DestroyImmediate(depthTexture);
         DestroyImmediate(depthMaterial);
-        DestroyImmediate(cameraObj);
-
-
 
 #if UNITY_EDITOR
         // 刷新AssetDatabase以显示新创建的深度图资源
@@ -143,6 +193,7 @@ public class TemplateBuilder : MonoBehaviour
         renderCam.clearFlags = CameraClearFlags.SolidColor;
         renderCam.targetTexture = new RenderTexture(_textureSize, _textureSize, 24);
         renderCam.cullingMask = 1 << RenderLayer;
+        renderCam.allowMSAA = false;
     }
 
     public void RenderExecute(ref GameObject cameraObj, Vector3 camPos, Vector3 modelCenter, RenderTexture rt, Texture2D tex)
@@ -165,7 +216,7 @@ public class TemplateBuilder : MonoBehaviour
 
     }
 
-    public void SamplingAndUnproject(GameObject cameraObj, Texture2D depthTex, Matx33f K)
+    public (List<CPoint>, Matx33f) SamplingAndUnproject(GameObject cameraObj, Texture2D depthTex, Matx33f K)
     {
         // 获取相机外参（旋转矩阵R和平移向量t）
         Matrix4x4 cameraToWorld = cameraObj.transform.localToWorldMatrix;
@@ -202,9 +253,41 @@ public class TemplateBuilder : MonoBehaviour
         rChannelMatOrigin.put(0, 0, rChannelData);
 
         // 调用EdgeSampler.Sample方法进行处理
-        List<CPoint> sampledPoints = EdgeSampler.Sample(rChannelMatOrigin, 0, maxPointCount, K, R, t);
+        
+        List<CPoint> sampledPoints = EdgeSampler.Sample(rChannelMatOrigin, 0, _contourPointCountByView, K, R, t,
+            SaveImages? "Assets/DepthMaps" : null);
+        
 
         // 生成Debug小球
+        if (DebugPoints)
+        {
+            // 提取世界点用于可视化
+            List<Vector3> worldPoints = new List<Vector3>();
+            foreach (CPoint cPoint in sampledPoints)
+            {
+                worldPoints.Add(cPoint.center);
+            }
+
+            // 为每个反投影点创建小球
+            for (int i = 0; i < worldPoints.Count; i++)
+            {
+                Vector3 worldPoint = worldPoints[i];
+                GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                sphere.transform.position = new Vector3(worldPoint.x, worldPoint.y, worldPoint.z); //!opencv的相机坐标系y轴朝下;
+                sphere.transform.localScale = new Vector3(0.001f, 0.001f, 0.001f);
+
+                // 设置红色材质以便于识别
+                Renderer renderer = sphere.GetComponent<Renderer>();
+                if (renderer != null)
+                {
+                    renderer.sharedMaterial = new Material(Shader.Find("Standard"));
+                    renderer.sharedMaterial.color = Color.red;
+                }
+
+                // 将小球添加到列表中以便后续清除
+                pointCloudSpheres.Add(sphere);
+            }
+        }
 
 
         //保存图片
@@ -230,8 +313,63 @@ public class TemplateBuilder : MonoBehaviour
                 Debug.Log($"作为备选方案，成功保存为PNG文件: {fileName}");
             }
         }
-        
+
         rChannelMatOrigin.Dispose();
+        return (sampledPoints, R);
+    }
+    
+    /// <summary>
+    /// 加载模型模板文件
+    /// </summary>
+    public void LoadTemplateFile()
+    {
+        string loadmodelfilepath = Path.Combine(savePath, modelFileName);
+
+        if (File.Exists(loadmodelfilepath))
+        {
+            ModelTracker.Templates modelT = new ModelTracker.Templates();
+
+            modelT.Load(loadmodelfilepath);
+
+            // 创建小球
+            // 生成Debug小球
+            if (DebugPoints)
+            {
+                // 提取世界点用于可视化
+                List<Vector3> worldPoints = new List<Vector3>();
+                    
+                foreach (DView _view in modelT.views)
+                {
+                    foreach (CPoint cPoint in _view.contourPoints3d)
+                    {
+                        worldPoints.Add(cPoint.center);
+                    }
+                }
+                // 为每个反投影点创建小球
+                for (int i = 0; i < worldPoints.Count; i++)
+                {
+                    Vector3 worldPoint = worldPoints[i];
+                    GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                    sphere.transform.position = new Vector3(worldPoint.x, worldPoint.y, worldPoint.z); //!opencv的相机坐标系y轴朝下;
+                    sphere.transform.localScale = new Vector3(0.001f, 0.001f, 0.001f);
+
+                    // 设置红色材质以便于识别
+                    Renderer renderer = sphere.GetComponent<Renderer>();
+                    if (renderer != null)
+                    {
+                        renderer.sharedMaterial = new Material(Shader.Find("Standard"));
+                        renderer.sharedMaterial.color = Color.blue;
+                    }
+
+                    // 将小球添加到列表中以便后续清除
+                    pointCloudSpheres.Add(sphere);
+                }
+            }
+        }
+        else
+        {
+            Debug.LogError($"模型模板文件不存在: {loadmodelfilepath}");
+        }
     }
 
     /// <summary>
@@ -284,9 +422,14 @@ public class TemplateBuilder : MonoBehaviour
                 builder.GenerateTemplate();
             }
 
-            if (GUILayout.Button("保存Template Json"))
+            if (GUILayout.Button("清理Debug小球"))
             {
+                builder.ClearPointCloudSpheres();
+            }
 
+            if (GUILayout.Button("加载模型模板文件"))
+            {
+                builder.LoadTemplateFile();
             }
         }
     }

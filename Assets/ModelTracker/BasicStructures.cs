@@ -16,74 +16,9 @@ namespace ModelTracker
     {
         public Vector3 viewDir;
         public Matx33f R;
-        public Vector3 t;
         public List<CPoint> contourPoints3d = new List<CPoint>();
     }
 
-    [System.Serializable]
-    public class ViewIndex
-    {
-        private Mat _uvIndex;
-        private Mat _knnNbrs;
-        private double _du, _dv;
-
-        // 方向向量转UV坐标
-        public static void Dir2UV(Vector3 dir, out double u, out double v)
-        {
-            v = Mathf.Acos(dir[2]);
-            u = Mathf.Atan2(dir[1], dir[0]);
-            if (u < 0)
-                u += 2 * Mathf.PI;
-        }
-
-        // UV坐标转方向向量
-        public static Vector3 UV2Dir(double u, double v)
-        {
-            return new Vector3(
-                (float)(Math.Cos(u) * Math.Sin(v)),
-                (float)(Math.Sin(u) * Math.Sin(v)),
-                (float)Math.Cos(v)
-            );
-        }
-
-        // 获取KNN邻居
-        public int[] GetKnn(int vi)
-        {
-            int[] result = new int[_knnNbrs.cols() - 1];
-            // 这里简化实现，实际需要从Mat中提取数据
-            return result;
-        }
-
-        // 获取K值
-        public int GetK()
-        {
-            return _knnNbrs.cols() - 1;
-        }
-
-        // 构建视图索引
-        public void Build(List<DView> views, int nU = 200, int nV = 100, int k = 5)
-        {
-            // 简化实现，实际需要构建FLANN索引
-            _du = 2 * Mathf.PI / (nU - 1);
-            _dv = Mathf.PI / (nV - 1);
-            _uvIndex = Mat.zeros(nV, nU, CvType.CV_32S);
-            _knnNbrs = Mat.zeros(views.Count, k + 1, CvType.CV_32S);
-        }
-
-        // 获取指定方向的视图
-        public int GetViewInDir(Vector3 dir)
-        {
-            double u, v;
-            Dir2UV(dir, out u, out v);
-            int ui = Mathf.RoundToInt((float)(u / _du));
-            int vi = Mathf.RoundToInt((float)(v / _dv));
-
-            int[] data = new int[1];
-            _uvIndex.get(vi, ui, data);
-            return data[0];
-        }
-    }
-    
     // 3x3矩阵类，使用float类型
     [System.Serializable]
     public class Matx33f
@@ -98,6 +33,18 @@ namespace ModelTracker
             val[0] = 1; val[1] = 0; val[2] = 0;
             val[3] = 0; val[4] = 1; val[5] = 0;
             val[6] = 0; val[7] = 0; val[8] = 1;
+        }
+        
+        // 克隆方法，支持深拷贝
+        public Matx33f clone()
+        {
+            Matx33f result = new Matx33f();
+            if (val != null)
+            {
+                result.val = new float[val.Length];
+                Array.Copy(val, result.val, val.Length);
+            }
+            return result;
         }
 
         public static Matx33f eye()
@@ -188,15 +135,6 @@ namespace ModelTracker
             return mat;
         }
 
-        // 克隆方法
-        public Matx33f clone()
-        {
-            return new Matx33f(
-                val[0], val[1], val[2],
-                val[3], val[4], val[5],
-                val[6], val[7], val[8]
-            );
-        }
 
         // 获取元素访问器
         public float this[int row, int col]
@@ -348,6 +286,18 @@ namespace ModelTracker
             // 初始化为单位矩阵形式（前两列是单位矩阵，最后一列是平移）
             val[0] = 1; val[1] = 0; val[2] = 0;
             val[3] = 0; val[4] = 1; val[5] = 0;
+        }
+        
+        // 克隆方法，支持深拷贝
+        public Matx23f clone()
+        {
+            Matx23f result = new Matx23f();
+            if (val != null)
+            {
+                result.val = new float[val.Length];
+                Array.Copy(val, result.val, val.Length);
+            }
+            return result;
         }
 
         // 使用指定值初始化

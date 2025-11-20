@@ -30,7 +30,7 @@ namespace ModelTracker
         // 将2D点和深度反投影到3D点的方法
         public Vector3 Unproject(float x, float y, float z)
         {
-            Debug.Log($"Unproject Input: col:{x}, row:{y}, real depth:{z}");
+            //Debug.Log($"Unproject Input: col:{x}, row:{y}, real depth:{z}");
             // 首先将2D点转换为相机坐标系中的点
             // 1. 计算归一化设备坐标 (考虑深度)
             float x_camera = (x * (z)); // 相机坐标系的深度要反向的，对应到DepthOnly.shader的深度计算
@@ -39,12 +39,12 @@ namespace ModelTracker
             // 相机坐标系中的3D点
             Vector3 p_camera = new Vector3(x_camera, y_camera, z);
 
-            Debug.Log($"p_camera: {p_camera}");
+            //Debug.Log($"p_camera: {p_camera}");
 
             // 2. 使用KR的逆矩阵将相机坐标系中的点转换为世界坐标系
             Vector3 P_world = _KR_inv * (p_camera - _Kt);
 
-            Debug.Log($"P_world: {P_world}");
+            //Debug.Log($"P_world: {P_world}");
 
             return P_world;
         }
@@ -52,12 +52,12 @@ namespace ModelTracker
         // 将3D点投影到2D点的方法（对应C++的operator()重载）
         public Vector2 Project(Vector3 P)
         {
-            Debug.Log($"Input point:{P}");
+            //Debug.Log($"Input point:{P}");
             // 计算 p = KR * P + Kt
             Vector3 p0 = _R * P + _t;
-            Debug.Log($"Proj in camera space:{p0}");
+            //Debug.Log($"Proj in camera space:{p0}");
             Vector3 p = _KR * P + _Kt;
-            Debug.Log($"Proj in image space:{p}");
+            //Debug.Log($"Proj in image space:{p}");
             // 透视除法，返回2D点
             return new Vector2((float)(p[0] / p[2]), (float)(p[1] / p[2]));
         }

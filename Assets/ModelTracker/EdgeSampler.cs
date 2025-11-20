@@ -20,7 +20,7 @@ namespace ModelTracker
             try
             {
                 // 步骤1: 二值化处理提取物体mask
-                Debug.Log("执行二值化处理提取物体mask");
+                //Debug.Log("执行二值化处理提取物体mask");
                 Mat maskMat = new Mat();
                 
                 // 将32位浮点Mat转换为8位用于二值化
@@ -29,12 +29,12 @@ namespace ModelTracker
                 
                 // 二值化：大于0的像素设为255（白色），否则为0（黑色）
                 Imgproc.threshold(floatMask, maskMat, thresholdValue, 255, Imgproc.THRESH_BINARY);
-                Debug.Log($"二值化处理完成，阈值: {thresholdValue}");
+                //Debug.Log($"二值化处理完成，阈值: {thresholdValue}");
                 
 
                 
                 // 步骤3: 在mask上执行findContour轮廓检测
-                Debug.Log("开始轮廓检测");
+                //Debug.Log("开始轮廓检测");
                 List<MatOfPoint> contours = new List<MatOfPoint>();
                 Mat hierarchy = new Mat();
                 
@@ -42,12 +42,7 @@ namespace ModelTracker
                 Imgproc.findContours(maskMat, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
                 Debug.Log($"轮廓检测完成，找到 {contours.Count} 个轮廓");
                 
-                // 筛选出最大的轮廓（假设是主要物体）
-                MatOfPoint largestContour = null;
-                double maxArea = 0;
-
                 List<Point> finalContourPoints = new List<Point>();
-
 
                 foreach (MatOfPoint contour in contours)
                 {
@@ -94,7 +89,7 @@ namespace ModelTracker
                     // 平滑处理
                     Mat smoothed = new Mat();
                     Imgproc.boxFilter(cimg, smoothed, -1, new Size(1, smoothWSZ));
-                    Debug.Log($"smoothed mat:{smoothed.size()}");
+                    //Debug.Log($"smoothed mat:{smoothed.size()}");
                     
                     Point[] smoothContourPoints = new Point[contourPoints.Length];
                     for (int i = 0;i < contourPoints.Length;i++)
@@ -166,9 +161,6 @@ namespace ModelTracker
                         if (maskSaveSuccess)
                         {
                             Debug.Log($"二值化mask已成功保存为PNG: {maskFullPath}");
-#if UNITY_EDITOR
-                            UnityEditor.AssetDatabase.Refresh();
-#endif
                         }
                         else
                         {
@@ -195,9 +187,6 @@ namespace ModelTracker
                         if (maskSaveSuccess2)
                         {
                             Debug.Log($"平滑轮廓mask已成功保存为PNG: {maskFullPath2}");
-#if UNITY_EDITOR
-                            UnityEditor.AssetDatabase.Refresh();
-#endif
                         }
                         else
                         {

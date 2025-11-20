@@ -6,7 +6,11 @@ Temp/
 obj/
 Build/
 Logs/
+Assets/DepthMaps/
+Assets/StreamingAssets/ModelTemplates/*.png
+Assets/StreamingAssets/ModelTemplates/*.png.meta
 
+*.png
 # IDE相关文件
 .vs/
 .vsconfig
