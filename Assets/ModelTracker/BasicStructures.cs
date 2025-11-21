@@ -197,6 +197,16 @@ namespace ModelTracker
             return result;
         }
 
+        public static Matx33f operator *(float scalar, Matx33f m)
+        {
+            Matx33f result = new Matx33f();
+            for (int i = 0; i < 9; i++)
+            {
+                result.val[i] = m.val[i] * scalar;
+            }
+            return result;
+        }
+
         // 转置矩阵
         public Matx33f t()
         {

@@ -205,8 +205,23 @@ namespace ModelTracker
         // 这里不做实现，需要进行额外的加载，这里只做模板文件所需内容的分析
         public void Build()
         {
-            // 简化实现
             viewIndex.Build(this.views);
+        }
+
+        // 获取最近的视图索引
+        private int _getNearestView(Vector3 viewDir)
+        {
+            return viewIndex.GetViewInDir(viewDir);
+        }
+
+        private Vector3 _getViewDir(Matx33f R, Vector3 t)
+        {
+            return ((-1f) * R.inv() * t - modelCenter).normalized;
+        }
+        public int GetNearestView(ref Matx33f R, ref Vector3 t)
+        {
+            Vector3 viewDir = _getViewDir(R, t);
+            return _getNearestView(viewDir);
         }
 
         // load函数，加载模板文件

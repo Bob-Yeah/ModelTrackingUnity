@@ -92,6 +92,106 @@ namespace ModelTracker
             return prob;
         }
 
+        // 优化后的C#像素添加方法
+        private bool AddPixel(Point p, int fgBgIndex, Mat img, ref float[] dtabSum)
+        {
+            // 四舍五入到最近的整数坐标
+            int x = Mathf.RoundToInt((float)p.x);
+            int y = Mathf.RoundToInt((float)p.y);
 
+            // 边界检查
+            if (x >= 0 && x < img.cols() && y >= 0 && y < img.rows())
+            {
+                // 获取像素颜色值
+                byte[] pixel = new byte[3];
+                img.get(y, x, pixel);
+
+                // 计算颜色索引并更新统计
+                int colorIndex = _color_index(pixel);
+                if (colorIndex >= 0 && colorIndex < _dtab.Count)
+                {
+                    _dtab[colorIndex].nbf[fgBgIndex] += 1.0f;
+                    dtabSum[fgBgIndex] += 1.0f;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public void update(Templates templ, ref Mat img, ref Pose pose, Matx33f K, float learningRate)
+        {
+            //learningRate = 0.1f;
+            Vector3 modelCenter = templ.modelCenter;
+            Projector prj = new Projector(K, pose.R, pose.t);
+
+
+            float[] dtabSum = { 0.0f, 0.0f };
+            
+            // 重置临时直方图
+            for (int i = 0; i < _dtab.Count; i++)
+            {
+                _dtab[i].nbf[0] = 0.0f;
+                _dtab[i].nbf[1] = 0.0f;
+            }
+            
+            
+
+            // // 获取最近的视图（需要确保Templates类有这个方法）
+            // int curView = 0; // 假设这里需要调用Templates类的方法来获取最近视图
+            
+            // // 假设我们使用viewIndex.GetViewInDir方法来获取最近视图
+            // // 这里需要根据实际的Templates类实现来调整
+            // Vector3 viewDir = pose.t * -1; // 简化的视图方向计算
+            // curView = templ.viewIndex.GetViewInDir(viewDir);
+            
+            // if (curView >= 0 && curView < templ.views.Count)
+            // {
+            //     Point objCenter = prj.Project(modelCenter);
+                
+            //     DView view = templ.views[curView];
+            //     foreach (CPoint cp in view.contourPoints3d)
+            //     {
+            //         Point c = prj.Project(cp.center);
+            //         Point n = new Point(objCenter.x - c.x, objCenter.y - c.y);
+            //         float fgLength = (float)Mathf.Sqrt((float)(n.x * n.x + n.y * n.y));
+                    
+            //         if (fgLength > 0) // 避免除以零
+            //         {
+            //             n.x = n.x / fgLength;
+            //             n.y = n.y / fgLength;
+            //         }
+
+            //         Point pt = new Point(c.x + _unconsiderLength * n.x, c.y + _unconsiderLength * n.y);
+            //         int end = Mathf.Min(_consideredLength, (int)fgLength);
+                    
+            //         for (int i = _unconsiderLength; i < end; i++)
+            //         {
+            //             if (!AddPixel(pt, 1))
+            //                 break;
+                        
+            //             pt.x += n.x;
+            //             pt.y += n.y;
+            //         }
+                    
+            //         end = _consideredLength * 4;
+            //         pt = new Point(c.x - _unconsiderLength * n.x, c.y - _unconsiderLength * n.y);
+                    
+            //         for (int i = _unconsiderLength; i < end; i++)
+            //         {
+            //             if (!AddPixel(pt, 0))
+            //                 break;
+                        
+            //             pt.x -= n.x;
+            //             pt.y -= n.y;
+            //         }
+            //     }
+                
+            //     // 更新直方图
+            //     if (dtabSum[0] > 0 && dtabSum[1] > 0)
+            //     {
+            //         _do_update(_tab.ToArray(), _dtab.ToArray(), learningRate, dtabSum);
+            //     }
+            // }
+        }
     }
 }
