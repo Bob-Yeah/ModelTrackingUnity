@@ -142,7 +142,7 @@ public class OpenCamera : MonoBehaviour
             // 应用旋转角度修正
             rawImage.rectTransform.localEulerAngles = new Vector3(0, 0, -currentWebCam.videoRotationAngle);
             Debug.Log("摄像头启动成功，旋转角度: " + currentWebCam.videoRotationAngle);
-            
+            rawImage.rectTransform.sizeDelta = new Vector2(actualWidth, actualHeight);
             // 分辨率处理说明：
             // 1. Unity的WebCamTexture会自动选择最接近请求分辨率的实际支持分辨率
             // 2. 不同设备和相机支持的分辨率不同，无法直接获取完整的支持列表
@@ -180,11 +180,12 @@ public class OpenCamera : MonoBehaviour
             
             // 应用旋转角度修正
             rawImage.rectTransform.localEulerAngles = new Vector3(0, 0, -currentWebCam.videoRotationAngle);
-            
+
             // 分辨率处理说明：
             // 1. Unity的WebCamTexture会自动选择最接近请求分辨率的实际支持分辨率
             // 2. 不同设备和相机支持的分辨率不同，无法直接获取完整的支持列表
             // 3. 如果需要特定分辨率，建议在应用中提供几种常用分辨率选项让用户选择
+            rawImage.rectTransform.sizeDelta = new Vector2(actualWidth,actualHeight);
         }
     }
     

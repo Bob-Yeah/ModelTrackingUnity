@@ -218,7 +218,7 @@ namespace ModelTracker
         {
             return ((-1f) * R.inv() * t - modelCenter).normalized;
         }
-        public int GetNearestView(ref Matx33f R, ref Vector3 t)
+        public int GetNearestView(Matx33f R, Vector3 t)
         {
             Vector3 viewDir = _getViewDir(R, t);
             return _getNearestView(viewDir);

@@ -14,7 +14,7 @@ namespace ModelTracker
         private const int TAB_SIZE = TAB_WIDTH * TAB_WIDTH_2;
 
         // 直方图项，存储前景/背景计数
-        private struct TabItem
+        private class TabItem
         {
             public float[] nbf;  // [0]=背景, [1]=前景
 
@@ -33,8 +33,8 @@ namespace ModelTracker
 
         public ColorHistogram()
         {
-            _tab = new List<TabItem>(TAB_SIZE);
-            _dtab = new List<TabItem>(TAB_SIZE);
+            _tab = new List<TabItem>();
+            _dtab = new List<TabItem>();
 
             // 初始化直方图数组
             for (int i = 0; i < TAB_SIZE; i++)
@@ -118,15 +118,19 @@ namespace ModelTracker
             return false;
         }
 
-        public void update(Templates templ, ref Mat img, ref Pose pose, Matx33f K, float learningRate)
+        public void update(Templates templ, Mat img, Pose pose, Matx33f K, float learningRate)
         {
             //learningRate = 0.1f;
             Vector3 modelCenter = templ.modelCenter;
             Projector prj = new Projector(K, pose.R, pose.t);
-
+            Debug.Log($"Debug 1 modelCenter: {modelCenter}");
 
             float[] dtabSum = { 0.0f, 0.0f };
             
+            Debug.Log($"Debug 2 dtabSum: {dtabSum[0]}, {dtabSum[1]}");
+
+            Debug.Log($"dtab info: {_dtab.Count}, tab info: {_tab.Count}");
+
             // 重置临时直方图
             for (int i = 0; i < _dtab.Count; i++)
             {
@@ -134,64 +138,62 @@ namespace ModelTracker
                 _dtab[i].nbf[1] = 0.0f;
             }
             
-            
+            // 获取最近的视图（需要确保Templates类有这个方法）
+            int curView = 0; 
+            // 使用viewIndex.GetViewInDir方法来获取最近视图
+            // 这里需要根据实际的Templates类实现来调整
+            curView = templ.GetNearestView(pose.R, pose.t);
+            Debug.Log($"Debug 2 curView: {curView}");
 
-            // // 获取最近的视图（需要确保Templates类有这个方法）
-            // int curView = 0; // 假设这里需要调用Templates类的方法来获取最近视图
-            
-            // // 假设我们使用viewIndex.GetViewInDir方法来获取最近视图
-            // // 这里需要根据实际的Templates类实现来调整
-            // Vector3 viewDir = pose.t * -1; // 简化的视图方向计算
-            // curView = templ.viewIndex.GetViewInDir(viewDir);
-            
-            // if (curView >= 0 && curView < templ.views.Count)
-            // {
-            //     Point objCenter = prj.Project(modelCenter);
+            if (curView >= 0 && curView < templ.views.Count)
+            {
+                Vector2 objCenter = prj.Project(modelCenter);
                 
-            //     DView view = templ.views[curView];
-            //     foreach (CPoint cp in view.contourPoints3d)
-            //     {
-            //         Point c = prj.Project(cp.center);
-            //         Point n = new Point(objCenter.x - c.x, objCenter.y - c.y);
-            //         float fgLength = (float)Mathf.Sqrt((float)(n.x * n.x + n.y * n.y));
+                DView view = templ.views[curView];
+                Debug.Log($"Debug 2 view: {view}");
+                foreach (CPoint cp in view.contourPoints3d)
+                {
+                    Vector2 c = prj.Project(cp.center);
+                    Vector2 n = new Vector2(objCenter.x - c.x, objCenter.y - c.y);
+                    float fgLength = (float)Mathf.Sqrt((float)(n.x * n.x + n.y * n.y));
                     
-            //         if (fgLength > 0) // 避免除以零
-            //         {
-            //             n.x = n.x / fgLength;
-            //             n.y = n.y / fgLength;
-            //         }
+                    if (fgLength > 0) // 避免除以零
+                    {
+                        n.x = n.x / fgLength;
+                        n.y = n.y / fgLength;
+                    }
 
-            //         Point pt = new Point(c.x + _unconsiderLength * n.x, c.y + _unconsiderLength * n.y);
-            //         int end = Mathf.Min(_consideredLength, (int)fgLength);
+                    Point pt = new Point(c.x + _unconsiderLength * n.x, c.y + _unconsiderLength * n.y);
+                    int end = Mathf.Min(_consideredLength, (int)fgLength);
                     
-            //         for (int i = _unconsiderLength; i < end; i++)
-            //         {
-            //             if (!AddPixel(pt, 1))
-            //                 break;
+                    for (int i = _unconsiderLength; i < end; i++)
+                    {
+                        if (!AddPixel(pt, 1, img, ref dtabSum))
+                            break;
                         
-            //             pt.x += n.x;
-            //             pt.y += n.y;
-            //         }
+                        pt.x += n.x;
+                        pt.y += n.y;
+                    }
                     
-            //         end = _consideredLength * 4;
-            //         pt = new Point(c.x - _unconsiderLength * n.x, c.y - _unconsiderLength * n.y);
+                    end = _consideredLength * 4;
+                    pt = new Point(c.x - _unconsiderLength * n.x, c.y - _unconsiderLength * n.y);
                     
-            //         for (int i = _unconsiderLength; i < end; i++)
-            //         {
-            //             if (!AddPixel(pt, 0))
-            //                 break;
+                    for (int i = _unconsiderLength; i < end; i++)
+                    {
+                        if (!AddPixel(pt, 0, img, ref dtabSum))
+                            break;
                         
-            //             pt.x -= n.x;
-            //             pt.y -= n.y;
-            //         }
-            //     }
+                        pt.x -= n.x;
+                        pt.y -= n.y;
+                    }
+                }
                 
-            //     // 更新直方图
-            //     if (dtabSum[0] > 0 && dtabSum[1] > 0)
-            //     {
-            //         _do_update(_tab.ToArray(), _dtab.ToArray(), learningRate, dtabSum);
-            //     }
-            // }
+                // 更新直方图
+                if (dtabSum[0] > 0 && dtabSum[1] > 0)
+                {
+                    _do_update(_tab.ToArray(), _dtab.ToArray(), learningRate, dtabSum);
+                }
+            }
         }
     }
 }

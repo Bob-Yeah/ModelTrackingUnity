@@ -10,7 +10,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
-
+#if UNITY_EDITOR
 [ExecuteInEditMode]
 public class TemplateBuilder : MonoBehaviour
 {
@@ -434,3 +434,4 @@ public class TemplateBuilder : MonoBehaviour
         }
     }
 }
+#endif

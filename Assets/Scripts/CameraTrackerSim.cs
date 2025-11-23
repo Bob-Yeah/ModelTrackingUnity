@@ -85,7 +85,6 @@ public class CameraTrackerSim : MonoBehaviour
 
 
         ManualRenderCamera();
-        //rt2mat();
         resultImage.texture = inputTexture;
     }
     
@@ -224,6 +223,7 @@ public class CameraTrackerSim : MonoBehaviour
         lastT = currentT;
         lastR = currentR;
     }
+    
     private void rt2mat()
     {
         if (inputTexture == null)
@@ -232,7 +232,8 @@ public class CameraTrackerSim : MonoBehaviour
         }
         
         // 保存当前的RenderTexture
-        RenderTexture currentRT = RenderTexture.active;
+        // 可能不需要的
+        // RenderTexture currentRT = RenderTexture.active;
         
         try
         {
@@ -261,7 +262,7 @@ public class CameraTrackerSim : MonoBehaviour
             Utils.texture2DToMat(inputTexture, inputMat, false); // 不翻转y轴，刻意进行的。
             
             // 保存inputMat为PNG文件
-            string savePath = Path.Combine(Application.persistentDataPath, "inputMat.png");
+            string savePath = Path.Combine("Assets/DepthMaps", "inputMat.png");
             Imgcodecs.imwrite(savePath, inputMat);
             Debug.Log("inputMat 已保存为 PNG 文件: " + savePath);
             Debug.Log("Texture2D successfully converted to Mat using OpenCVForUnity Utils.");
@@ -273,10 +274,11 @@ public class CameraTrackerSim : MonoBehaviour
         finally
         {
             // 恢复之前的RenderTexture
-            RenderTexture.active = currentRT;
+            // RenderTexture.active = currentRT;
         }
     }
 
+    // 初始化第一帧的相机姿态
 
     public void SetupFirstGTFrame()
     {
@@ -319,14 +321,26 @@ public class CameraTrackerSim : MonoBehaviour
         );
 
         // 初始化颜色Historgram
-        Mat img = new Mat(height, width, CvType.CV_32FC1);
-        colorHistogram.update(templateRuntimeInst.ModelTemplate, ref img, ref modelPose, K, 1f);
+        ManualRenderCamera(); //触发相机渲染，最近结果在inputMat中
+        colorHistogram.update(templateRuntimeInst.ModelTemplate, inputMat, modelPose, K, 1f);
+        Mat img = colorHistogram.GetProb(inputMat);
+        
+        // 将float32格式转换为CV_8UC1灰度格式
+        Mat imgGray8u = new Mat();
+        
+        // 使用convertTo进行类型转换
+        img.convertTo(imgGray8u, CvType.CV_8UC1, 255.0, 0.0);
 
+        
         // mat 转换为 texture
+
         if (colorHistogramTexture == null)
-            colorHistogramTexture = new Texture2D(width, height, TextureFormat.RFloat, false);
+            colorHistogramTexture = new Texture2D(width, height, TextureFormat.R8, false);
         // 将Mat数据拷贝到Texture2D
-        Utils.matToTexture2D(img, colorHistogramTexture);
+        Utils.matToTexture2D(imgGray8u, colorHistogramTexture);
+        
+        // 释放转换后的图像对象
+        imgGray8u.Dispose();
         // 赋值给输出RawImage
         resultImage.texture = colorHistogramTexture;
 

@@ -155,7 +155,7 @@ GameObject:
   - component: {fileID: 9032579758932362040}
   - component: {fileID: 6415650256946478662}
   m_Layer: 0
-  m_Name: ColorHistogram
+  m_Name: OpenCamera
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

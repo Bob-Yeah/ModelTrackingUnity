@@ -38,7 +38,7 @@ public class ScanLineTestEditor : Editor
         }
     }
 }
-#endif
+
 /// <summary>
 /// 扫描线测试脚本，用于加载图片并准备扫描线计算
 /// </summary>
@@ -315,3 +315,4 @@ public class ScanLineTest : MonoBehaviour
         }
     }
 }
+#endif

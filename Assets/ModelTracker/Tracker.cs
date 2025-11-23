@@ -19,9 +19,16 @@ namespace ModelTracker
         public Pose pose;
         public float err;
     };
-
+    
+    struct FrameInfo
+    {
+        public float theta;
+        public float err;
+    }
+    
     public class Tracker
     {
+
         public void reset()
         {
 

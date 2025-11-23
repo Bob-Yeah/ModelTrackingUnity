@@ -126,7 +126,7 @@ namespace ModelTracker
 #if UNITY_EDITOR
                 UnityEngine.Object.DestroyImmediate(tempTexture);
 #else
-                Destroy(tempTexture);
+                UnityEngine.Object.Destroy(tempTexture);
 #endif
             }
             catch (System.Exception e)
