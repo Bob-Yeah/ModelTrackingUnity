@@ -36,6 +36,7 @@ public class CameraTrackerSim : MonoBehaviour
     Frame _prvec;
     Frame _cur;
 
+    private Optimizer optimizer;
 
     // 相机移动轨迹相关变量
     private bool isFirstMove = true;
@@ -314,7 +315,7 @@ public class CameraTrackerSim : MonoBehaviour
         float cy = (float)height / 2.0f;
 
         // 构建相机内参矩阵K
-        Matx33f K = new Matx33f(
+        K = new Matx33f(
             focalLength, 0, cx,
             0, focalLength, cy,
             0, 0, 1
@@ -324,25 +325,49 @@ public class CameraTrackerSim : MonoBehaviour
         ManualRenderCamera(); //触发相机渲染，最近结果在inputMat中
         colorHistogram.update(templateRuntimeInst.ModelTemplate, inputMat, modelPose, K, 1f);
         Mat img = colorHistogram.GetProb(inputMat);
-        
+
         // 将float32格式转换为CV_8UC1灰度格式
         Mat imgGray8u = new Mat();
-        
+
         // 使用convertTo进行类型转换
         img.convertTo(imgGray8u, CvType.CV_8UC1, 255.0, 0.0);
 
-        
+
         // mat 转换为 texture
 
         if (colorHistogramTexture == null)
             colorHistogramTexture = new Texture2D(width, height, TextureFormat.R8, false);
         // 将Mat数据拷贝到Texture2D
         Utils.matToTexture2D(imgGray8u, colorHistogramTexture);
-        
+
         // 释放转换后的图像对象
         imgGray8u.Dispose();
         // 赋值给输出RawImage
         resultImage.texture = colorHistogramTexture;
+
+    }
+
+    // test scanline
+    void TestScanLine()
+    {
+        // 确定ROI
+        ModelTracker.Projector prj_test = new ModelTracker.Projector(K, currentR, currentT);
+        int curView = templateRuntimeInst.ModelTemplate.GetNearestView(currentR, currentT);
+        List<Vector2> c2d = prj_test.Project(templateRuntimeInst.ModelTemplate.views[curView].contourPoints3d, (p) => p.center);
+        OpenCVForUnity.CoreModule.Rect roi = ModelTrackerUtils.getBoundingBox2D(c2d);
+        ModelTrackerUtils.rectAppend(ref roi, 100, 100, 100, 100);
+
+        OpenCVForUnity.CoreModule.Rect roiMat = ModelTrackerUtils.rectOverlapped(roi, new OpenCVForUnity.CoreModule.Rect(0, 0, inputMat.width(), inputMat.height()));
+
+
+        Mat inputProbMat = colorHistogram.GetProb(inputMat);
+
+        if (optimizer == null)
+            optimizer = new Optimizer();
+
+        optimizer.computeScanLines(inputProbMat, roiMat);
+
+        
 
     }
 
