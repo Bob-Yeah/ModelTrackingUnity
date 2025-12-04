@@ -1938,7 +1938,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 640, y: 480, z: 1}
+  m_LocalScale: {x: 320, y: 320, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -1956,10 +1956,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _requestedDeviceName: 
-  _requestedWidth: 640
-  _requestedHeight: 480
+  _requestedWidth: 320
+  _requestedHeight: 320
   _requestedIsFrontFacing: 0
-  _requestedFPS: 30
+  _requestedFPS: 60
   _rotate90Degree: 0
   _flipVertical: 0
   _flipHorizontal: 0
@@ -2063,8 +2063,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6987a6edde5ccfc42ab5cbe60bac224c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  modelAsset: {fileID: 5022602860645237092, guid: b567196da48f42c409e6f022218e802f, type: 3}
-  inputTexture: {fileID: 2800000, guid: 5ad81d04bf367d9409b6a7f0c7ec235a, type: 3}
+  modelAsset: {fileID: 5022602860645237092, guid: ceb1eea62086e344dbed4c844efa2699, type: 3}
   resultText: {fileID: 71779551}
   resultRT: {fileID: 8400000, guid: 183b645bb8e22cc499f4074f28566ffb, type: 2}
   results: []
