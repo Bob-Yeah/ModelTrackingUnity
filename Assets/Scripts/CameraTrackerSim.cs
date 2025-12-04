@@ -367,7 +367,12 @@ public class CameraTrackerSim : MonoBehaviour
 
         optimizer.computeScanLines(inputProbMat, roiMat);
 
+        //可视化扫描线
+        Mat mat1_vis = new Mat(inputProbMat.rows(), inputProbMat.cols(), CvType.CV_8UC3);
+        optimizer.visualizeScanLines(ref mat1_vis);
         
+        // 保存扫描线可视化结果
+        ModelTrackerUtils.SaveMatToFile(mat1_vis, "scanline_vis.png");
 
     }
 

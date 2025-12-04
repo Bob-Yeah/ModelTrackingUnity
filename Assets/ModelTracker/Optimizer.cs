@@ -519,7 +519,7 @@ namespace ModelTracker
             }
         }
         
-        public void visualizeScanLines(Mat mat)
+        public void visualizeScanLines(ref Mat mat)
         {
             // 可视化扫描线
             Debug.Log("_dirs:" + _dirs.Count);

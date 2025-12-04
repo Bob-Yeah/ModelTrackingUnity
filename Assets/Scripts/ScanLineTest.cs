@@ -277,7 +277,7 @@ public class ScanLineTest : MonoBehaviour
 
             //可视化扫描线
             Mat mat1_vis = new Mat(mat1.rows(), mat1.cols(), CvType.CV_8UC3);
-            optimizer.visualizeScanLines(mat1_vis);
+            optimizer.visualizeScanLines(ref mat1_vis);
             
             // 保存扫描线可视化结果
             ModelTrackerUtils.SaveMatToFile(mat1_vis, "mat1_vis.png");
