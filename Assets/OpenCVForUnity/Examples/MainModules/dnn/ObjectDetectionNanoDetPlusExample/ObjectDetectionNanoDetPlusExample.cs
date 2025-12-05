@@ -331,19 +331,19 @@ namespace OpenCVForUnityExample
                 }
                 else
                 {
-                    //Imgproc.cvtColor(rgbaMat, bgrMat, Imgproc.COLOR_RGBA2BGR);
+                    Imgproc.cvtColor(rgbaMat, bgrMat, Imgproc.COLOR_RGBA2BGR);
 
-                    ////TickMeter tm = new TickMeter();
-                    ////tm.start();
+                    TickMeter tm = new TickMeter();
+                    tm.start();
 
-                    //Mat results = objectDetector.infer(bgrMat);
+                    Mat results = objectDetector.infer(bgrMat);
 
-                    ////tm.stop();
-                    ////Debug.Log("NanoDetPlusObjectDetector Inference time (preprocess + infer + postprocess), ms: " + tm.getTimeMilli());
+                    tm.stop();
+                    Debug.Log("NanoDetPlusObjectDetector Inference time (preprocess + infer + postprocess), ms: " + tm.getTimeMilli());
 
-                    //Imgproc.cvtColor(bgrMat, rgbaMat, Imgproc.COLOR_BGR2RGBA);
+                    Imgproc.cvtColor(bgrMat, rgbaMat, Imgproc.COLOR_BGR2RGBA);
 
-                    //objectDetector.visualize(rgbaMat, results, false, true);
+                    objectDetector.visualize(rgbaMat, results, false, true);
                 }
 
                 Utils.matToTexture2D(rgbaMat, texture);

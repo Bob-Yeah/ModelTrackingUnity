@@ -176,6 +176,8 @@ namespace OpenCVForUnityExample.DnnModel
 
             List<Mat> output_blob = new List<Mat>();
             object_detection_net.forward(output_blob, object_detection_net.getUnconnectedOutLayersNames());
+            Debug.Log("output_blob:" + output_blob.Count);
+            Debug.Log("output_blob[0]:" + output_blob[0].width() + "," + output_blob[0].height() + "," + output_blob[0].depth());
 
             // Postprocess
             Mat results = postprocess(output_blob[0], image.size());
@@ -239,7 +241,10 @@ namespace OpenCVForUnityExample.DnnModel
             }
 
             int num = output_blob_0.size(1);
+            Debug.Log("output_blob_0.channels():" + output_blob_0.channels()); 
+            Debug.Log("0:" + output_blob_0.size(0) + ",1:" + output_blob_0.size(2) + ",2:num:" + num);
             Mat output_blob_numx112 = output_blob_0.reshape(1, num);
+            Debug.Log("output_blob_numx112:" + output_blob_numx112.size());
 
             int[] hsizes = new int[strides.Length];// stride for stride in self.strides
             int[] wsizes = new int[strides.Length];// stride for stride in self.strides

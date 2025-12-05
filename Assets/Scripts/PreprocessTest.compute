@@ -1,0 +1,31 @@
+#pragma kernel CSMain
+
+Texture2D<float4> _InputTexture;
+RWTexture2D<float4> Result;
+
+float4 _Mean = float4(123.675, 116.28, 103.53, 0);
+float4 _Std = float4(58.395, 57.12, 57.375, 0); 
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    uint width, height;
+    _InputTexture.GetDimensions(width, height);
+    if (id.x >= width || id.y >= height) return;
+
+    float4 pixel = _InputTexture[id.xy];
+
+    float b = pixel.r * _Std.b;
+    float g = pixel.g * _Std.g;
+    float r = pixel.b * _Std.r;
+
+    r += _Mean.r;
+    g += _Mean.g;
+    b += _Mean.b;
+
+    r /= 255.0;
+    g /= 255.0;
+    b /= 255.0;
+
+    Result[id.xy] = float4(r, g, b, pixel.a);
+}
