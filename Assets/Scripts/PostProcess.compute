@@ -1,0 +1,193 @@
+#pragma kernel CSMain
+
+//// 输入参数
+//2125x33x1
+StructuredBuffer<float> _input;
+//2125x6x1
+//RWTexture2D<float> Result;
+RWStructuredBuffer<float> _result;
+
+//100x5 
+
+//RWStructuredBuffer<float> inputVector;
+//int inputWidth;
+//int inputHeight;
+//int inputChannels;
+//float confThreshold;
+//int numClasses;
+//int regMax;
+//int[] strides;
+//int numStrides;
+//float2[] anchors;
+//int numAnchors;
+//float[] project;
+
+//// 输出参数
+//RWStructuredBuffer<float4> outputBoxes;
+//RWStructuredBuffer<float> outputConfidences;
+//RWStructuredBuffer<float> outputClassIds;
+//RWStructuredBuffer<int> outputCount;
+
+//// Softmax函数
+//float4 Softmax(float4 values) {
+//    float maxVal = max(max(max(values.x, values.y), values.z), values.w);
+//    float4 expValues = exp(values - maxVal);
+//    float sumExp = expValues.x + expValues.y + expValues.z + expValues.w;
+//    return expValues / sumExp;
+//}
+
+//// 8元素的Softmax函数
+//float8 Softmax8(float8 values) {
+//    float maxVal = max(max(max(values.x, values.y), values.z), values.w);
+//    maxVal = max(max(max(maxVal, values.s0), values.s1), values.s2);
+//    maxVal = max(maxVal, values.s3);
+//    float8 expValues = exp(values - maxVal);
+//    float sumExp = expValues.x + expValues.y + expValues.z + expValues.w + 
+//                   expValues.s0 + expValues.s1 + expValues.s2 + expValues.s3;
+//    return expValues / sumExp;
+//}
+
+//// 从输入矩阵中获取值
+//float GetInputValue(int x, int y) {
+//    return inputMatrix[y * inputWidth + x];
+//}
+
+//// 主核函数
+[numthreads(64, 1, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    int stride = 1;
+    if (id.x >= 2125) 
+    {
+        return;
+    }
+    int anchor_x = 0;
+    int anchor_y = 0;
+    if (id.x < 1600)
+    {
+        stride = 8;
+        anchor_x = id.x % 40;
+        anchor_y = id.x / 40;
+        
+    }
+    else if (id.x < 2000)
+    {
+        anchor_x = (id.x - 1600) % 20;
+        anchor_y = (id.x - 1600) / 20;
+        stride = 16;
+    }
+    else if (id.x < 2100)
+    {
+        stride = 32;
+        anchor_x = (id.x - 2000) % 10;
+        anchor_y = (id.x - 2000) / 10;
+    }
+    else
+    {
+        stride = 64;
+        anchor_x = (id.x - 2100) % 5;
+        anchor_y = (id.x - 2100) / 5;
+    }
+    _result[id.x] = _input[id.x * 33];
+    //_result[id.x * 6 + 1] = _input[id.x * 33 + 1];
+    //_result[id.x * 6 + 2] = _input[id.x * 33 + 2];
+    //_result[id.x * 6 + 3] = _input[id.x * 33 + 3];
+    //_result[id.x * 6 + 4] = _input[id.x * 33 + 4];
+    //_result[id.x * 6 + 5] = _input[id.x * 33 + 5];
+    
+}
+
+//    // 确保线程ID在有效范围内
+//    if (id.x >= numAnchors) {
+//        return;
+//    }
+    
+//    // 获取当前锚点
+//    float2 anchor = float2(anchors[id.x * 2], anchors[id.x * 2 + 1]);
+    
+//    // 确定当前锚点属于哪个尺度
+//    int strideIndex = 0;
+//    int currentStride = strides[0];
+//    int cumulativeAnchors = 0;
+    
+//    for (int i = 0; i < numStrides; i++) {
+//        int stride = strides[i];
+//        int feat_h = 320 / stride;
+//        int feat_w = 320 / stride;
+//        int strideAnchors = feat_h * feat_w;
+        
+//        if (id.x < cumulativeAnchors + strideAnchors) {
+//            strideIndex = i;
+//            currentStride = stride;
+//            break;
+//        }
+        
+//        cumulativeAnchors += strideAnchors;
+//    }
+    
+//    // 提取分类分数
+//    float maxConf = 0.0f;
+//    float classId = 0.0f;
+    
+//    for (int c = 0; c < numClasses; c++) {
+//        float conf = GetInputValue(c, id.x);
+//        if (conf > maxConf) {
+//            maxConf = conf;
+//            classId = (float)c;
+//        }
+//    }
+    
+//    // 如果置信度低于阈值，跳过
+//    if (maxConf < confThreshold) {
+//        return;
+//    }
+    
+//    // 提取边界框预测并应用softmax
+//    float4 p_dot = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    
+//    for (int p = 0; p < 4; p++) {
+//        // 提取8个预测值
+//        float8 bboxPred = float8(
+//            GetInputValue(numClasses + p * 8 + 0, id.x),
+//            GetInputValue(numClasses + p * 8 + 1, id.x),
+//            GetInputValue(numClasses + p * 8 + 2, id.x),
+//            GetInputValue(numClasses + p * 8 + 3, id.x),
+//            GetInputValue(numClasses + p * 8 + 4, id.x),
+//            GetInputValue(numClasses + p * 8 + 5, id.x),
+//            GetInputValue(numClasses + p * 8 + 6, id.x),
+//            GetInputValue(numClasses + p * 8 + 7, id.x)
+//        );
+        
+//        // 应用softmax
+//        float8 softmaxPred = Softmax8(bboxPred);
+        
+//        // 计算点积
+//        float dot = 0.0f;
+//        for (int i = 0; i < 8; i++) {
+//            dot += softmaxPred[i] * project[i];
+//        }
+        
+//        p_dot[p] = dot;
+//    }
+    
+//    // 计算边界框坐标
+//    p_dot *= currentStride;
+    
+//    float x1 = anchor.x - p_dot.x;
+//    float y1 = anchor.y - p_dot.y;
+//    float x2 = anchor.x + p_dot.z;
+//    float y2 = anchor.y + p_dot.w;
+    
+//    // 限制边界框在图像范围内
+//    x1 = clamp(x1, 0.0f, 320.0f);
+//    y1 = clamp(y1, 0.0f, 320.0f);
+//    x2 = clamp(x2, 0.0f, 320.0f);
+//    y2 = clamp(y2, 0.0f, 320.0f);
+    
+//    // 将结果保存到输出缓冲区
+//    int outputIndex = InterlockedAdd(outputCount[0], 1);
+    
+//    outputBoxes[outputIndex] = float4(x1, y1, x2, y2);
+//    outputConfidences[outputIndex] = maxConf;
+//    outputClassIds[outputIndex] = classId;
+//}

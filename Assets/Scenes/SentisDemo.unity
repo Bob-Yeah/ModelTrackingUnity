@@ -404,7 +404,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0cd44c1031e13a943bb63640046fad76, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_UiScaleMode: 0
+  m_UiScaleMode: 1
   m_ReferencePixelsPerUnit: 100
   m_ScaleFactor: 1
   m_ReferenceResolution: {x: 800, y: 600}
@@ -541,6 +541,7 @@ GameObject:
   m_Component:
   - component: {fileID: 2092546439}
   - component: {fileID: 2092546440}
+  - component: {fileID: 2092546441}
   m_Layer: 0
   m_Name: TesorToTexture
   m_TagString: Untagged
@@ -583,6 +584,27 @@ MonoBehaviour:
   results: []
   computeProducer: {fileID: 7200000, guid: c7084d7776749b04aade3cb0f53532f2, type: 3}
   computeProducerTest: {fileID: 7200000, guid: e4b9c8aef7d937e4ea28618394a2c205, type: 3}
+  postProcessCompute: {fileID: 7200000, guid: 547d517a9b6a8244bb232e66e8dad414, type: 3}
+  visualizeCompute: {fileID: 7200000, guid: 46a5e099e41640c4fab089aae940041e, type: 3}
+--- !u!114 &2092546441
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2092546437}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 03ffc138d8c85b946b9bae82bf2c68c7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  alignment: 1
+  offset: {x: 10, y: 10}
+  boxVisible: 1
+  boxWidth: 75
+  boxHeight: 30
+  padding: {x: 8, y: 5}
+  consoleHeight: 50
 --- !u!1 &2112460980
 GameObject:
   m_ObjectHideFlags: 0
