@@ -1,0 +1,136 @@
+#pragma kernel ClearOutput
+#pragma kernel NMSKernel
+
+StructuredBuffer<float> inputBuffer;
+RWStructuredBuffer<float> outputBuffer;
+RWStructuredBuffer<int> outputCount;
+RWStructuredBuffer<int> suppressedBuffer;
+
+float nmsThreshold;
+int numDetections;
+
+struct Detection
+{
+    float classId;
+    float score;
+    float4 bbox;  // left, top, right, bottom
+};
+
+groupshared Detection sharedDetections[256];
+
+float CalculateIoU(float4 boxA, float4 boxB)
+{
+    float interLeft = max(boxA.x, boxB.x);
+    float interTop = max(boxA.y, boxB.y);
+    float interRight = min(boxA.z, boxB.z);
+    float interBottom = min(boxA.w, boxB.w);
+
+    float interWidth = max(0, interRight - interLeft);
+    float interHeight = max(0, interBottom - interTop);
+    float interArea = interWidth * interHeight;
+
+    float areaA = (boxA.z - boxA.x) * (boxA.w - boxA.y);
+    float areaB = (boxB.z - boxB.x) * (boxB.w - boxB.y);
+
+    return interArea / (areaA + areaB - interArea + 1e-8);
+}
+
+[numthreads(1, 1, 1)]
+void ClearOutput(uint3 id : SV_DispatchThreadID)
+{
+    outputCount[0] = 0;
+}
+
+[numthreads(256, 1, 1)]
+void NMSKernel(uint3 id : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint localIdx : SV_GroupIndex)
+{
+    uint globalIdx = gid.x * 256 + localIdx;
+
+    if (globalIdx < numDetections)
+    {
+        int baseIdx = globalIdx * 6;
+        sharedDetections[localIdx].classId = inputBuffer[baseIdx + 5];
+        sharedDetections[localIdx].score = inputBuffer[baseIdx + 4];
+        sharedDetections[localIdx].bbox = float4(
+            inputBuffer[baseIdx + 0],
+            inputBuffer[baseIdx + 1],
+            inputBuffer[baseIdx + 2],
+            inputBuffer[baseIdx + 3]
+            );
+    }
+    else
+    {
+        //invalid
+        sharedDetections[localIdx].score = -1;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (globalIdx < numDetections && sharedDetections[localIdx].score > 0)
+    {
+        Detection currentDet = sharedDetections[localIdx];
+        bool suppressed = false;
+
+        //compare with group
+        for (uint i = 0; i < 256; i++)
+        {
+            // skip self
+            if (i == localIdx)
+                continue;
+
+            Detection otherDet = sharedDetections[i];
+
+            // skip invalid
+            if (otherDet.score <= 0)
+                continue;
+
+            // skip other cls
+            if (otherDet.classId != currentDet.classId)
+                continue;
+
+            // compare value compress lower one
+            if (otherDet.score > currentDet.score)
+            {
+                float iou = CalculateIoU(currentDet.bbox, otherDet.bbox);
+                if (iou > nmsThreshold)
+                {
+                    suppressed = true;
+                    break;
+                }
+            }
+        }
+
+        // mark in global buffer
+        if (suppressed)
+        {
+            suppressedBuffer[globalIdx] = 1;
+        }
+        else
+        {
+            suppressedBuffer[globalIdx] = 0;
+        }
+    }
+
+    // sync
+    GroupMemoryBarrierWithGroupSync();
+
+    // write result
+    if (globalIdx < numDetections)
+    {
+        Detection det = sharedDetections[localIdx];
+
+        if (suppressedBuffer[globalIdx] == 0 && det.score > 0)
+        {
+            int outputPos;
+            InterlockedAdd(outputCount[0], 1, outputPos);
+
+            int outputBaseIdx = outputPos * 6;
+            outputBuffer[outputBaseIdx] = det.classId;
+            outputBuffer[outputBaseIdx + 1] = det.score;
+            outputBuffer[outputBaseIdx + 2] = det.bbox.x;
+            outputBuffer[outputBaseIdx + 3] = det.bbox.y;
+            outputBuffer[outputBaseIdx + 4] = det.bbox.z;
+            outputBuffer[outputBaseIdx + 5] = det.bbox.w;
+        }
+    }
+}

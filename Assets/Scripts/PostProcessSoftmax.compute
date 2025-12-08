@@ -1,0 +1,164 @@
+#pragma kernel CSMain
+
+//// 输入参数
+//2125x33x1
+StructuredBuffer<float> _input;
+//2125x6x1
+//RWTexture2D<float> Result;
+RWStructuredBuffer<float> _result;
+
+int numClasses;
+int imgSize;
+float confThreshold;
+
+struct float8
+{
+    float4 data0;
+    float4 data1;
+};
+
+// 8元素的Softmax函数 是reg_max = 7,写死的逻辑
+float8 Softmax8(float8 values) {
+    float maxVal0 = max(max(max(values.data0.x, values.data0.y), values.data0.z), values.data0.w);
+    float maxVal1 = max(max(max(values.data1.x, values.data1.y), values.data1.z), values.data1.w);
+    float maxVal = max(maxVal0, maxVal1);
+    float4 expValues0 = exp(values.data0 - maxVal);
+    float4 expValues1 = exp(values.data1 - maxVal);
+    float sumExp = expValues0.x + expValues0.y + expValues0.z + expValues0.w +
+                   expValues1.x + expValues1.y + expValues1.z + expValues1.w;
+    float4 softmax0 = expValues0 / sumExp;
+    float4 softmax1 = expValues1 / sumExp;
+    float8 result;
+    result.data0 = softmax0;
+    result.data1 = softmax1;
+    return result;
+}
+
+//// 主核函数
+[numthreads(64, 1, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    int stride = 1;
+    int rowStep = numClasses + 4 * 8;
+    float8 project;
+
+    // 为320的尺寸写死的算法
+    // stride [8,16,32,64]
+    // anchor的grid单位尺寸 [40,20,10,5]
+    if (id.x >= 2125) 
+    {
+        return;
+    }
+    int anchor_x = 0;
+    int anchor_y = 0;
+    if (id.x < 1600)
+    {
+        stride = 8;
+        anchor_x = id.x % 40;
+        anchor_y = id.x / 40;
+        
+    }
+    else if (id.x < 2000)
+    {
+        anchor_x = (id.x - 1600) % 20;
+        anchor_y = (id.x - 1600) / 20;
+        stride = 16;
+    }
+    else if (id.x < 2100)
+    {
+        stride = 32;
+        anchor_x = (id.x - 2000) % 10;
+        anchor_y = (id.x - 2000) / 10;
+    }
+    else
+    {
+        stride = 64;
+        anchor_x = (id.x - 2100) % 5;
+        anchor_y = (id.x - 2100) / 5;
+    }
+    
+    // 提取分类分数
+    float maxConf = 0.0f;
+    float classId = 0.0f;
+    
+    for (int c = 0; c < numClasses; c++) {
+        float conf = _input[id.x * rowStep];
+        if (conf > maxConf) {
+            maxConf = conf;
+            classId = (float)c;
+        }
+    }
+    
+    // 提取边界框预测并应用softmax
+    float4 p_dot = float4(0.0f, 0.0f, 0.0f, 0.0f);
+
+    // 如果置信度低于阈值，直接赋值0，返回
+    if (maxConf < confThreshold) {
+        
+        _result[id.x * 6] = 0;
+        _result[id.x * 6 + 1] = 0;
+        _result[id.x * 6 + 2] = 0;
+        _result[id.x * 6 + 3] = 0;
+        _result[id.x * 6 + 4] = -1; //confidence < 0
+        _result[id.x * 6 + 5] = 0;
+
+        return;
+    }
+
+    for (int p = 0; p < 4; p++) {
+        // 提取8个预测值
+        float d0 = _input[id.x * rowStep + p * 8 + numClasses + 0];
+        float d1 = _input[id.x * rowStep + p * 8 + numClasses + 1];
+        float d2 = _input[id.x * rowStep + p * 8 + numClasses + 2];
+        float d3 = _input[id.x * rowStep + p * 8 + numClasses + 3];
+        float d4 = _input[id.x * rowStep + p * 8 + numClasses + 4];
+        float d5 = _input[id.x * rowStep + p * 8 + numClasses + 5];
+        float d6 = _input[id.x * rowStep + p * 8 + numClasses + 6];
+        float d7 = _input[id.x * rowStep + p * 8 + numClasses + 7];
+
+        float4 part0 = float4(d0, d1, d2, d3);
+        float4 part1 = float4(d4, d5, d6, d7);
+
+        float8 bboxPred;
+        bboxPred.data0 = part0;
+        bboxPred.data1 = part1;
+
+        // 应用softmax
+        float8 softmaxPred = Softmax8(bboxPred);
+
+        // 计算点积
+        float dot = 0.0f;
+        dot += softmaxPred.data0.x * 0;
+        dot += softmaxPred.data0.y * 1;
+        dot += softmaxPred.data0.z * 2;
+        dot += softmaxPred.data0.w * 3;
+        dot += softmaxPred.data1.x * 4;
+        dot += softmaxPred.data1.y * 5;
+        dot += softmaxPred.data1.z * 6;
+        dot += softmaxPred.data1.w * 7;
+
+        p_dot[p] = dot;
+    }
+
+
+    // 计算边界框坐标
+    p_dot *= stride;
+
+    float x1 = anchor_x * stride - p_dot.x;
+    float y1 = anchor_y * stride - p_dot.y;
+    float x2 = anchor_x * stride + p_dot.z;
+    float y2 = anchor_y * stride + p_dot.w;
+
+    // 限制边界框在图像范围内
+    x1 = clamp(x1, 0.0f, (float)imgSize);
+    y1 = clamp(y1, 0.0f, (float)imgSize);
+    x2 = clamp(x2, 0.0f, (float)imgSize);
+    y2 = clamp(y2, 0.0f, (float)imgSize);
+
+    _result[id.x * 6] = x1;
+    _result[id.x * 6 + 1] = y1;
+    _result[id.x * 6 + 2] = x2;
+    _result[id.x * 6 + 3] = y2;
+    _result[id.x * 6 + 4] = maxConf;
+    _result[id.x * 6 + 5] = classId;
+}

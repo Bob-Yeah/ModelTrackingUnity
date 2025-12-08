@@ -5,6 +5,7 @@ RWTexture2D<float4> Result;
 
 float4 _Mean = float4(123.675, 116.28, 103.53, 0);
 float4 _Std = float4(58.395, 57.12, 57.375, 0); 
+int _FrameIdx;
 
 [numthreads(8,8,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
@@ -13,7 +14,11 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     _InputTexture.GetDimensions(width, height);
     if (id.x >= width || id.y >= height) return;
 
-    float4 pixel = _InputTexture[id.xy];
+    float offset = ((_FrameIdx % 100) - 50) / 100.0 * 0.2 * width;
+    uint xlocation = uint(id.x + offset + width) % width;
+    uint2 pixelLocation = uint2(xlocation, id.y);
+    //float4 pixel = _InputTexture[id.xy];
+    float4 pixel = _InputTexture[pixelLocation];
 
     float r = pixel.r * 255.0;
     float g = pixel.g * 255.0;
