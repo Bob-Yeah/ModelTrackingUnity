@@ -54,9 +54,9 @@ void CSMain (uint3 id : SV_DispatchThreadID) {
         float4 boxColor = GetClassColor((int)detection.cls);
 
         int x1 = (int)detection.x1;
-        int y1 = height-(int)detection.y1;
+        int y1 = height - (int)detection.y1;
         int x2 = (int)detection.x2;
-        int y2 = height-(int)detection.y2;
+        int y2 = height - (int)detection.y2;
 
         for (int x = x1; x <= x2; x++) {
             DrawRect(int2(x, y1), width, height, boxColor);

@@ -1,0 +1,65 @@
+#pragma kernel CSMain
+
+
+RWTexture2D<float4> inputTexture;
+
+StructuredBuffer<float> detections;
+
+int frameIdx;
+
+float4 GetClassColor(int cls) {
+    cls = ((int)cls + frameIdx) % 6;
+    switch (cls) {
+    case 0: return float4(1.0, 0.0, 0.0, 1.0);
+    case 1: return float4(0.0, 1.0, 0.0, 1.0);
+    case 2: return float4(0.0, 0.0, 1.0, 1.0);
+    case 3: return float4(1.0, 1.0, 0.0, 1.0);
+    case 4: return float4(1.0, 0.0, 1.0, 1.0);
+    case 5: return float4(0.0, 1.0, 1.0, 1.0);
+    default: return float4(1.0, 0.5, 0.0, 1.0);
+    }
+}
+
+void DrawRect(int2 pos, int width, int height, float4 color) {
+    if (pos.x < 0 || pos.x >= width ||
+        pos.y < 0 || pos.y >= height)
+    {
+        return;
+    }
+
+    inputTexture[pos] = color;
+}
+
+[numthreads(256, 1, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID) {
+    uint width, height;
+    inputTexture.GetDimensions(width, height);
+
+    int detectionCount = detections[0];
+
+    if (id.x < detectionCount) {
+
+        float4 boxColor = GetClassColor((int)detections[1 + id.x * 6 + 5]);
+
+        int x1 = (int)detections[1 + id.x * 6];
+        int y1 = height - (int)detections[1 + id.x * 6 + 1];
+        int x2 = (int)detections[1 + id.x * 6 + 2];
+        int y2 = height - (int)detections[1 + id.x * 6 + 3];
+
+        for (int x = x1; x <= x2; x++) {
+            DrawRect(int2(x, y1), width, height, boxColor);
+        }
+
+        for (int x = x1; x <= x2; x++) {
+            DrawRect(int2(x, y2), width, height, boxColor);
+        }
+
+        for (int y = y2; y <= y1; y++) {
+            DrawRect(int2(x1, y), width, height, boxColor);
+        }
+
+        for (int y = y2; y <= y1; y++) {
+            DrawRect(int2(x2, y), width, height, boxColor);
+        }
+    }
+}

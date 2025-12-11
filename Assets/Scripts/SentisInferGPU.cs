@@ -3,9 +3,12 @@ using System.Diagnostics;
 using Unity.Sentis;
 using UnityEngine;
 using System.Runtime.InteropServices;
+using System.Collections;
+using UnityEngine.Rendering;
 
 public class SentisInferGPU : MonoBehaviour
 {
+    public TMPro.TextMeshProUGUI FPStext;
     public ModelAsset modelAsset;
     [SerializeField]
     Texture2D inputTexture;
@@ -30,10 +33,19 @@ public class SentisInferGPU : MonoBehaviour
     ComputeShader postProcessSoftmaxCompute;
 
     [SerializeField]
+    ComputeShader sortingCompute;
+
+    [SerializeField]
     ComputeShader NMSCompute;
 
     [SerializeField]
     ComputeShader visualizeCompute;
+
+    [SerializeField]
+    ComputeShader visualizeComputeGPU;
+
+    [SerializeField]
+    ComputeShader visualizeSoftmaxTestCompute;
 
     public int imgSize = 320;
     public int anchorsCount = 2125;
@@ -52,14 +64,20 @@ public class SentisInferGPU : MonoBehaviour
     private int postProcessSoftmaxKernelHandle;
 
     private int visualizeKernelHandle;
+    private int visualizeGPUKernelHandle;
 
     private int m_ComputeInputIndex;
     private int m_ComputeOutputIndex;
 
     private ComputeBuffer detectionDataBuffer;
-    private ComputeBuffer _outputBuffer;
+    private ComputeBuffer SoftMaxOutputBuffer;
+    private ComputeBuffer SortingOutputBuffer;
+    private ComputeBuffer NMSOutputBuffer;
+    private ComputeBuffer NMSSuppressedBuffer;
+    private ComputeBuffer scoreIndexPairs;
 
-
+    private int clearKernel;
+    private int nmsKernel;
 
     /// <summary>
     /// Performance Metrics
@@ -69,28 +87,27 @@ public class SentisInferGPU : MonoBehaviour
     long totalSoftmaxTime = 0;
     long totalNMSTime = 0;
     long totalVisualizeTime = 0;
+    long totalDownloadTime = 0;
     float totalInference = 0;
     float totalSoftmax = 0;
     float totalNMS = 0;
     float totalVisualize = 0;
+    float totalDownload = 0;
 
-    int validRun = 0;
-    float validRunTotal = 0f;
-    int updateCount = 0;
     Stopwatch sw;
 
+    private bool readGPUData = false;
     float currentTime;
 
-
     [StructLayout(LayoutKind.Sequential)]
-    public readonly struct DetectionData
+    public struct DetectionData
     {
-        public readonly float conf;
-        public readonly float cls;
-        public readonly float x1;
-        public readonly float y1;
-        public readonly float x2;
-        public readonly float y2;
+        public float x1;
+        public float y1;
+        public float x2;
+        public float y2;
+        public float conf;
+        public float cls;
 
         // sizeof(DetectionData)
         public const int Size = 6 * sizeof(float);
@@ -111,14 +128,17 @@ public class SentisInferGPU : MonoBehaviour
         }
     };
 
+    int modelLayerCount = 0;
+    public int framesToExectute = 2;
+
     // Start is called before the first frame update
-    void Start()
+    IEnumerator Start()
     {
         // 关闭垂直同步（关键！）
         QualitySettings.vSyncCount = 0;
 
         // 设置目标帧率为120 FPS
-        Application.targetFrameRate = 120;
+        Application.targetFrameRate = 90;
 
         // Load Model
         Unity.Sentis.Model sourceModel = Unity.Sentis.ModelLoader.Load(modelAsset);
@@ -127,30 +147,20 @@ public class SentisInferGPU : MonoBehaviour
         FunctionalTensor[] inputs = graph.AddInputs(sourceModel);
         FunctionalTensor[] outputs = Functional.Forward(sourceModel, inputs);
         runtimeModel = graph.Compile(outputs);
-
+        modelLayerCount = runtimeModel.layers.Count;
         // Create an engine
-        worker = new Worker(runtimeModel, BackendType.GPUCompute);
+        worker = new Worker(runtimeModel, BackendType.CPU);
         //results = new float[70125];
 
         // 初始化后处理compute shader
-        if (postProcessSoftmaxCompute == null)
-        {
-            UnityEngine.Debug.LogError("PostProcess softmax compute shader is not assigned!");
-            return;
-        }
         postProcessSoftmaxKernelHandle = postProcessSoftmaxCompute.FindKernel("CSMain");
-        if (postProcessSoftmaxKernelHandle < 0)
-        {
-            UnityEngine.Debug.LogError("Failed to find CSMain kernel in PostProcess compute shader!");
-            return;
-        }
 
         m_ComputeInputIndex = Shader.PropertyToID("_input");
         m_ComputeOutputIndex = Shader.PropertyToID("_result");
 
-
         int datastride = sizeof(float);
-        _outputBuffer = new ComputeBuffer(anchorsCount * 6, datastride, ComputeBufferType.Default);
+        SoftMaxOutputBuffer = new ComputeBuffer(anchorsCount * 6, datastride, ComputeBufferType.Default);
+        SortingOutputBuffer = new ComputeBuffer(anchorsCount * 6, datastride, ComputeBufferType.Default);
 
         // 初始化可视化compute shader
         if (visualizeCompute != null)
@@ -166,13 +176,58 @@ public class SentisInferGPU : MonoBehaviour
             UnityEngine.Debug.LogWarning("VisualizeDetection compute shader is not assigned!");
         }
 
+        if (visualizeComputeGPU != null)
+        {
+            visualizeGPUKernelHandle = visualizeComputeGPU.FindKernel("CSMain");
+            if (visualizeGPUKernelHandle < 0)
+            {
+                UnityEngine.Debug.LogError("Failed to find CSMain kernel in VisualizeDetectionGPU compute shader!");
+            }
+        }
+        else
+        {
+            UnityEngine.Debug.LogWarning("VisualizeDetection compute shader is not assigned!");
+        }
+
+
+
 
         sw = Stopwatch.StartNew();
-
         preProcessKernelHandle = preProcessCompute.FindKernel("CSMain");
 
-        currentTime = Time.realtimeSinceStartup;
 
+        ///////////////////////////////////
+        clearKernel = NMSCompute.FindKernel("ClearOutput");
+        nmsKernel = NMSCompute.FindKernel("NMSKernel");
+
+        NMSOutputBuffer = new ComputeBuffer(256 * 6 + 1, sizeof(float));
+        NMSSuppressedBuffer = new ComputeBuffer(256, sizeof(int));
+
+        scoreIndexPairs = new ComputeBuffer(Mathf.NextPowerOfTwo(anchorsCount), sizeof(float) * 2); //4096
+
+        //ModelQuantizer.QuantizeWeights(QuantizationType.Float16, ref runtimeModel);
+
+        //// Serialize the quantized model to a file.
+        //ModelWriter.Save("nanodet_fp16.onnx", runtimeModel);
+
+        //Preprocess
+        preProcessCompute.SetTexture(preProcessKernelHandle, "_InputTexture", inputTexture);
+        preProcessCompute.SetTexture(preProcessKernelHandle, "Result", resultRT);
+
+        preProcessCompute.SetVector("_Mean", new Vector4(123.675f, 116.28f, 103.53f, 0));
+        preProcessCompute.SetVector("_Std", new Vector4(58.395f, 57.12f, 57.375f, 0));
+        preProcessCompute.SetInt("_FrameIdx", tick);
+        DispatchCompute();
+
+        inputTensor = TextureConverter.ToTensor(resultRT, 320, 320, 3);
+
+        while (true)
+        {
+            yield return new WaitForEndOfFrame();
+            UnityEngine.Debug.Log($"end of frame:{tick}");
+        }
+
+        yield return null;
     }
     void DispatchCompute()
     {
@@ -195,39 +250,92 @@ public class SentisInferGPU : MonoBehaviour
         postProcessSoftmaxCompute.Dispatch(postProcessSoftmaxKernelHandle, groupsX, 1, 1);
     }
 
+    int tick = 0;
+    float elapsed = 0;
+    float fps = 0;
+
+    int actualOutputCount = 0;
+
+    bool executionStarted = false;
+
     
+
     // Update is called once per frame
     void Update()
     {
-        updateCount++;
-        //Preprocess
-        preProcessCompute.SetTexture(preProcessKernelHandle, "_InputTexture", inputTexture);
-        preProcessCompute.SetTexture(preProcessKernelHandle, "Result", resultRT);
+        tick++;
+        elapsed += Time.deltaTime;
+        if (elapsed >= 1f)
+        {
+            fps = tick / elapsed;
+            tick = 0;
+            elapsed = 0;
+        }
+        UnityEngine.Debug.Log($"start update tick:{tick}");
+        FPStext.text = $"FPS: {fps:F0}";
+        UpdateDetection();
+    }
+    IEnumerator executionSchedule;
+    void UpdateDetection()
+    {
+        if (readGPUData) return;
+        if (!executionStarted)
+        {
+            ////Preprocess
+            //preProcessCompute.SetTexture(preProcessKernelHandle, "_InputTexture", inputTexture);
+            //preProcessCompute.SetTexture(preProcessKernelHandle, "Result", resultRT);
 
-        preProcessCompute.SetVector("_Mean", new Vector4(123.675f, 116.28f, 103.53f, 0));
-        preProcessCompute.SetVector("_Std", new Vector4(58.395f, 57.12f, 57.375f, 0));
-        preProcessCompute.SetInt("_FrameIdx", updateCount);
-        DispatchCompute();
+            //preProcessCompute.SetVector("_Mean", new Vector4(123.675f, 116.28f, 103.53f, 0));
+            //preProcessCompute.SetVector("_Std", new Vector4(58.395f, 57.12f, 57.375f, 0));
+            //preProcessCompute.SetInt("_FrameIdx", tick);
+            //DispatchCompute();
 
-        //Inference
-        sw.Restart();
-        inputTensor = TextureConverter.ToTensor(resultRT, 320, 320, 3);
-        // Run the model with the input data
-        worker.Schedule(inputTensor);
+            //Inference
+            sw.Restart();
+            //inputTensor = TextureConverter.ToTensor(resultRT, 320, 320, 3);
+            // Run the model with the input data
+            //worker.Schedule(inputTensor);
+            executionSchedule = worker.ScheduleIterable(inputTensor);
+            executionStarted = true;
+            // shape:(1,2125,33)
+            sw.Stop();
+            totalInferenceTime += sw.ElapsedMilliseconds;
+            totalInference += 1;
+            UnityEngine.Debug.Log($"Inference Time: {totalInferenceTime / (double)(totalInference)} ms");
+        }
+
+        bool hasMoreWork = false;
+        int layersToRun = (modelLayerCount + framesToExectute) / framesToExectute; // round up
+        for (int i = 0; i < layersToRun; i++)
+        {
+            hasMoreWork = executionSchedule.MoveNext();
+            if (!hasMoreWork)
+                break;
+        }
+
+        if (hasMoreWork)
+        {
+            UnityEngine.Debug.Log($"hasMoreWork: {tick}; current layers: {layersToRun}, total layers:{modelLayerCount}");
+            return;
+        }
+            
+
         // Get the result
         outputTensor = worker.PeekOutput() as Tensor<float>;
-        // shape:(1,2125,33)
+        UnityEngine.Debug.Log($"outputTensor backend: {outputTensor.backendType}");
+        sw.Restart();
+        float[] results = outputTensor.DownloadToArray();
         sw.Stop();
-        totalInferenceTime += sw.ElapsedMilliseconds;
-        totalInference += 1;
-        UnityEngine.Debug.Log($"Inference Time: {totalInferenceTime / (double)(totalInference)} ms");
+        UnityEngine.Debug.Log($"read result: {sw.ElapsedMilliseconds} ms, results: {results.Length}");
+        executionStarted = false;
+        return;
 
         //Post process GPU -- Stage1 Softmax
         sw.Restart();
         var gpuTensorOut = ComputeTensorData.Pin(outputTensor);
         // The fastest path is to dispatch compute directly on this tensor's compute buffer.
         postProcessSoftmaxCompute.SetBuffer(postProcessSoftmaxKernelHandle, m_ComputeInputIndex, gpuTensorOut.buffer);
-        postProcessSoftmaxCompute.SetBuffer(postProcessSoftmaxKernelHandle, m_ComputeOutputIndex, _outputBuffer);
+        postProcessSoftmaxCompute.SetBuffer(postProcessSoftmaxKernelHandle, m_ComputeOutputIndex, SoftMaxOutputBuffer);
         postProcessSoftmaxCompute.SetInt("numClasses", num_classes);
         postProcessSoftmaxCompute.SetInt("imgSize", imgSize);
         postProcessSoftmaxCompute.SetFloat("confThreshold", conf_threshold);
@@ -235,90 +343,192 @@ public class SentisInferGPU : MonoBehaviour
         sw.Stop();
         totalSoftmaxTime += sw.ElapsedMilliseconds;
         totalSoftmax++;
-        //UnityEngine.Debug.Log($"Post Process Stage1 Time: {totalDownloadTime / (double)(totalFrames)} ms");
-        UnityEngine.Debug.Log($"Softmax result: {_outputBuffer.count}");
+        UnityEngine.Debug.Log($"Softmax result: {SoftMaxOutputBuffer.count}");
         UnityEngine.Debug.Log($"Softmax Stage Time: {totalSoftmaxTime / (double)(totalSoftmax)} ms");
+
+
+        // testing softmax: no problem!
+        //int softmaxTestKernelHandle = visualizeSoftmaxTestCompute.FindKernel("CSMain");
+        //visualizeSoftmaxTestCompute.SetTexture(softmaxTestKernelHandle, "outputTexture", resultRT);
+        //visualizeSoftmaxTestCompute.SetBuffer(softmaxTestKernelHandle, "inputBuffer", SoftMaxOutputBuffer);
+        //int vstc_threadGroupX = Mathf.CeilToInt(2125 / 128f);
+        //visualizeSoftmaxTestCompute.Dispatch(softmaxTestKernelHandle, vstc_threadGroupX, 1, 1);
+
 
         sw.Restart();
         // Post process GPU -- Stage2 NMS
-        //DetectionData[] data = PassToPost(results);
+        // 数据排序，从2125中找到前256个分数最大的框；Todo Test：应该是满足需求了？
+
+        sortingCompute.SetInt("numDetections", anchorsCount);
+        sortingCompute.SetInt("stride", 6);
+
+        // 内核索引
+        int initKernel = sortingCompute.FindKernel("InitializeSortData");
+        int sortKernel = sortingCompute.FindKernel("BitonicSortStep");
+        int outputKernel = sortingCompute.FindKernel("WriteSortedOutput");
+        int padded_count = Mathf.NextPowerOfTwo(anchorsCount);
+        // 设置缓冲区
+        sortingCompute.SetBuffer(initKernel, "inputBuffer", SoftMaxOutputBuffer);
+        sortingCompute.SetInt("PADDED_COUNT", padded_count);
+        sortingCompute.SetBuffer(initKernel, "scoreIndexPairs", scoreIndexPairs);
+
+        sortingCompute.SetBuffer(sortKernel, "scoreIndexPairs", scoreIndexPairs);
+
+        sortingCompute.SetBuffer(outputKernel, "inputBuffer", SoftMaxOutputBuffer);
+        sortingCompute.SetBuffer(outputKernel, "outputBuffer", SortingOutputBuffer);
+        sortingCompute.SetBuffer(outputKernel, "scoreIndexPairs", scoreIndexPairs);
+
+        // 执行初始化
+        sortingCompute.Dispatch(initKernel, Mathf.CeilToInt(padded_count / 256f), 1, 1);
+
+        // 执行排序
+        // Bitonic sort: log2(paddedSize) stages
+        int logN = 0;
+        for (int t = padded_count; t > 1; t >>= 1) logN++;
+
+        for (int stage_idx = 1; stage_idx <= logN; stage_idx++)
+        {
+            for (int pass_idx = 0; pass_idx < stage_idx; pass_idx++)
+            {
+                sortingCompute.SetInt("stage_idx", stage_idx);
+                sortingCompute.SetInt("pass_idx", pass_idx);
+                sortingCompute.SetBuffer(sortKernel, "scoreIndexPairs", scoreIndexPairs);
+                sortingCompute.Dispatch(sortKernel, Mathf.CeilToInt(padded_count / 64f), 1, 1);
+            }
+        }
+
+        // 写入结果
+        sortingCompute.Dispatch(outputKernel, Mathf.CeilToInt(anchorsCount / 256f), 1, 1);
+        UnityEngine.Debug.Log($"SortingOutputBuffer result: {SortingOutputBuffer.count}");
+
+        // 清除标记缓冲区
+        //NMSCompute.SetBuffer(clearKernel, "outputCount", NMSOutputCountBuffer);
+        //NMSCompute.Dispatch(clearKernel, 1, 1, 1);
+
+        // 256个结果的NMS
+        NMSCompute.SetFloat("nmsThreshold", nms_threshold);
+        NMSCompute.SetInt("numDetections", 256);
+        NMSCompute.SetBuffer(nmsKernel, "inputBuffer", SortingOutputBuffer);
+        NMSCompute.SetBuffer(nmsKernel, "outputBuffer", NMSOutputBuffer);
+        NMSCompute.SetBuffer(nmsKernel, "suppressedBuffer", NMSSuppressedBuffer);
+        //NMSCompute.SetBuffer(nmsKernel, "outputCount", NMSOutputCountBuffer);
+        NMSCompute.Dispatch(nmsKernel, 1, 1, 1);
+
         sw.Stop();
         totalNMSTime += sw.ElapsedMilliseconds;
         totalNMS++;
-        UnityEngine.Debug.Log($"PostProcess Time: {totalNMSTime / (double)(totalNMS)} ms");
+        UnityEngine.Debug.Log($"NMS: {totalNMSTime / (double)(totalNMS)} ms");
 
-        ////-----------------------------------------------------------------------------
-        //StringBuilder sb = new StringBuilder(512);
+        VisualizeDetectionsGPU();
 
-        //for (int i = 0; i < data.Length; ++i)
-        //{
-        //    var d = data[i];
-        //    string label = getClassLabel(d.cls);
+        executionStarted = false;
+        //AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(NMSOutputBuffer, (1 + (topK) * 6) * sizeof(float), 0, OnCompleteReadback);
 
-        //    sb.AppendFormat("-----------object {0}-----------", i + 1);
-        //    sb.AppendLine();
-        //    sb.AppendFormat("conf: {0:F4}", d.conf);
-        //    sb.AppendLine();
-        //    sb.Append("cls: ").Append(label);
-        //    sb.AppendLine();
-        //    sb.AppendFormat("box: {0:F0} {1:F0} {2:F0} {3:F0}", d.x1, d.y1, d.x2, d.y2);
-        //    sb.AppendLine();
-        //}
-        //UnityEngine.Debug.Log(sb.ToString());
-        ////-----------object 1-----------
-        ////conf: 0.9095
-        ////cls: brush
-        ////box: 106 92 166 148
+        //readGPUData = true;
+    }
+
+    void OnCompleteReadback(AsyncGPUReadbackRequest request)
+    {
+        if (!request.done)
+        {
+            UnityEngine.Debug.Log("readback hasnt done yet");
+            return;
+        }
 
 
-        ////test
-        ////-----------object 1---------- -
-        ////conf: 0.9078
-        ////cls: Brush
-        ////box: 106 92 166 148
-        ////-----------------------------------------------------------------------------
+        if (request.hasError)
+        {
+            UnityEngine.Debug.Log("readback error");
+        }
+        else
+        {
+            if (currentTime == 0)
+            {
+                currentTime = Time.realtimeSinceStartup;
+            }
+            else
+            {
+                UnityEngine.Debug.Log("Actual Interval:" + (Time.realtimeSinceStartup - currentTime) * 1000);
+                currentTime = Time.realtimeSinceStartup;
+            }
+            sw.Restart();
+            float[] outputData = request.GetData<float>().ToArray();
+            UnityEngine.Debug.Log("actualOutputCount:" + outputData[0]);
+            actualOutputCount = Mathf.Min((int)outputData[0],topK);
+            UnityEngine.Debug.Log("actualOutputCount:" + actualOutputCount);
+            UnityEngine.Debug.Log("outputData:"+ outputData.Length);
+            //NMSOutputBuffer.GetData(outputData, 0, 0, actualOutputCount * 6);
 
-        //sw.Restart();
+            List<DetectionData> results = new List<DetectionData>();
+            for (int i = 0; i < actualOutputCount; i++)
+            {
+                int baseIdx = 1 + i * 6;
+                results.Add(new DetectionData
+                {
+                    x1 = outputData[baseIdx],
+                    y1 = outputData[baseIdx + 1],
+                    x2 = outputData[baseIdx + 2],
+                    y2 = outputData[baseIdx + 3],
+                    conf = outputData[baseIdx + 4],
+                    cls = outputData[baseIdx + 5]
+                });
+            }
+            UnityEngine.Debug.Log($"Results: {results[results.Count - 1].ToString()}");
+            sw.Stop();
+            totalDownloadTime += sw.ElapsedMilliseconds;
+            totalDownload++;
+            UnityEngine.Debug.Log($"Download: {totalDownloadTime / (double)(totalDownload)} ms");
 
-        //// 使用compute shader可视化检测结果
-        //VisualizeDetections(data);
-
-        //sw.Stop();
-        //totalVisualizeTime += sw.ElapsedMilliseconds;
-        //totalVisualize++;
-        //UnityEngine.Debug.Log($"Visualize Time: {totalVisualizeTime / (double)(totalVisualize)} ms");
-
+            //sw.Restart();
+            //// 使用compute shader可视化检测结果
+            //VisualizeDetections(results.ToArray());
+            //sw.Stop();
+            //totalVisualizeTime += sw.ElapsedMilliseconds;
+            //totalVisualize++;
+            //UnityEngine.Debug.Log($"Visualize Time: {totalVisualizeTime / (double)(totalVisualize)} ms");
+            readGPUData = false;
+        }
     }
 
     void OnDisable()
     {
         // Tell the GPU we're finished with the memory the engine used
-        worker.Dispose();
+        worker?.Dispose();
 
         // 释放Tensor资源
-        if (inputTensor != null)
-        {
-            inputTensor.Dispose();
-        }
-        if (outputTensor != null)
-        {
-            outputTensor.Dispose();
-        }
-
+        inputTensor?.Dispose();
+        outputTensor?.Dispose();
         // 释放ComputeBuffer资源
-        if (detectionDataBuffer != null)
-        {
-            detectionDataBuffer.Release();
-            detectionDataBuffer = null;
-        }
-        if (_outputBuffer != null)
-        {
-            _outputBuffer.Release();
-        }
+        detectionDataBuffer?.Release();
+        SoftMaxOutputBuffer?.Release();
+        NMSOutputBuffer?.Release();
+        NMSSuppressedBuffer?.Release();
+        SortingOutputBuffer?.Release();
+        scoreIndexPairs?.Release();
     }
-    
 
-    
+    // 直接可视化Compute Buffer
+    private void VisualizeDetectionsGPU()
+    {
+        sw.Restart();
+        if (visualizeComputeGPU == null || visualizeGPUKernelHandle < 0)
+        {
+            UnityEngine.Debug.LogError("VisualizeDetectionGPU compute shader is not properly initialized!");
+            return;
+        }
+        // 设置compute shader参数
+        visualizeComputeGPU.SetTexture(visualizeGPUKernelHandle, "inputTexture", resultRT);
+        visualizeComputeGPU.SetBuffer(visualizeGPUKernelHandle, "detections", NMSOutputBuffer);
+        visualizeComputeGPU.SetInt("frameIdx", frameIdx);
+        frameIdx++;
+        // 执行compute shader
+        visualizeComputeGPU.Dispatch(visualizeGPUKernelHandle, 1, 1, 1);
+        sw.Stop();
+        totalVisualizeTime += sw.ElapsedMilliseconds;
+        totalVisualize++;
+        UnityEngine.Debug.Log($"Visualize Time: {totalVisualizeTime / (double)(totalVisualize)} ms");
+    }
+
 
     // 使用compute shader可视化检测结果
     private void VisualizeDetections(DetectionData[] detections)
@@ -335,6 +545,10 @@ public class SentisInferGPU : MonoBehaviour
             return;
         }
 
+        //for (int i = 0; i < detections.Length; i++)
+        //{
+        //    UnityEngine.Debug.Log(detections[i].ToString());
+        //}
 
         // 创建检测结果缓冲区
         if (detectionDataBuffer != null) detectionDataBuffer.Release();
@@ -348,8 +562,6 @@ public class SentisInferGPU : MonoBehaviour
         visualizeCompute.SetInt("detectionCount", detections.Length);
         visualizeCompute.SetInt("frameIdx", frameIdx);
         frameIdx++;
-
-
 
         // 计算线程组数量
         int width = resultRT.width;
@@ -382,283 +594,5 @@ public class SentisInferGPU : MonoBehaviour
 
         return className;
     }
-
-    //DetectionData[] PassToPost(ReadOnlySpan<float> result)
-    //{
-    //    // 使用GPU Compute Shader进行后处理
-    //    DetectionData[] data = PostprocessGPU();
-    //    return data;
-    //}
-
-    //protected DetectionData[] PostprocessGPU()
-    //{
-    //    // 创建新的缓冲区
-    //    inputMatrixBuffer = new ComputeBuffer(inputWidth * inputHeight, sizeof(float));
-    //    inputMatrixBuffer.SetData(inputMatrixData);
-
-    //    stridesBuffer = new ComputeBuffer(strides.Length, sizeof(int));
-    //    stridesBuffer.SetData(strides);
-
-    //    anchorsBuffer = new ComputeBuffer(num * 2, sizeof(float));
-    //    anchorsBuffer.SetData(anchorsData);
-
-    //    projectBuffer = new ComputeBuffer(reg_max + 1, sizeof(float));
-    //    projectBuffer.SetData(projectData);
-
-    //    outputBoxesBuffer = new ComputeBuffer(maxOutputCount, 4 * sizeof(float)); // float4
-    //    outputConfidencesBuffer = new ComputeBuffer(maxOutputCount, sizeof(float));
-    //    outputClassIdsBuffer = new ComputeBuffer(maxOutputCount, sizeof(float));
-
-    //    int[] outputCountData = new int[1] { 0 };
-    //    outputCountBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
-    //    outputCountBuffer.SetData(outputCountData);
-
-    //    // 设置Compute Shader参数
-    //    postProcessCompute.SetBuffer(postProcessKernelHandle, "inputMatrix", inputMatrixBuffer);
-    //    postProcessCompute.SetInt("inputWidth", inputWidth);
-    //    postProcessCompute.SetInt("inputHeight", inputHeight);
-    //    postProcessCompute.SetInt("inputChannels", inputChannels);
-    //    postProcessCompute.SetFloat("confThreshold", conf_threshold);
-    //    postProcessCompute.SetInt("numClasses", num_classes);
-    //    postProcessCompute.SetInt("regMax", reg_max);
-    //    postProcessCompute.SetBuffer(postProcessKernelHandle, "strides", stridesBuffer);
-    //    postProcessCompute.SetInt("numStrides", strides.Length);
-    //    postProcessCompute.SetBuffer(postProcessKernelHandle, "anchors", anchorsBuffer);
-    //    postProcessCompute.SetInt("numAnchors", num);
-    //    postProcessCompute.SetBuffer(postProcessKernelHandle, "project", projectBuffer);
-    //    postProcessCompute.SetBuffer(postProcessKernelHandle, "outputBoxes", outputBoxesBuffer);
-    //    postProcessCompute.SetBuffer(postProcessKernelHandle, "outputConfidences", outputConfidencesBuffer);
-    //    postProcessCompute.SetBuffer(postProcessKernelHandle, "outputClassIds", outputClassIdsBuffer);
-    //    postProcessCompute.SetBuffer(postProcessKernelHandle, "outputCount", outputCountBuffer);
-
-    //    // 调度Compute Shader
-    //    int threadGroupsX = Mathf.CeilToInt((float)num / 64);
-    //    postProcessCompute.Dispatch(postProcessKernelHandle, threadGroupsX, 1, 1);
-
-    //    // 读取结果
-    //    outputCountBuffer.GetData(outputCountData);
-    //    int actualOutputCount = outputCountData[0];
-
-    //    float[] outputBoxesData = new float[actualOutputCount * 4];
-    //    float[] outputConfidencesData = new float[actualOutputCount];
-    //    float[] outputClassIdsData = new float[actualOutputCount];
-
-    //    outputBoxesBuffer.GetData(outputBoxesData, 0, 0, actualOutputCount * 4);
-    //    outputConfidencesBuffer.GetData(outputConfidencesData, 0, 0, actualOutputCount);
-    //    outputClassIdsBuffer.GetData(outputClassIdsData, 0, 0, actualOutputCount);
-
-    //    // 释放缓冲区
-    //    DisposeComputeBuffers();
-
-    //    // 准备NMS输入
-    //    if (boxes_m_c4 == null || boxes_m_c4.rows() != actualOutputCount)
-    //        boxes_m_c4 = new Mat(actualOutputCount, 1, CvType.CV_64FC4);
-    //    if (confidences_m == null || confidences_m.rows() != actualOutputCount)
-    //        confidences_m = new Mat(actualOutputCount, 1, CvType.CV_32FC1);
-    //    if (class_ids_m == null || class_ids_m.rows() != actualOutputCount)
-    //        class_ids_m = new Mat(actualOutputCount, 1, CvType.CV_32SC1);
-
-    //    if (boxes == null || boxes.rows() != actualOutputCount)
-    //        boxes = new MatOfRect2d(boxes_m_c4);
-    //    if (confidences == null || confidences.rows() != actualOutputCount)
-    //        confidences = new MatOfFloat(confidences_m);
-    //    if (class_ids == null || class_ids.rows() != actualOutputCount)
-    //        class_ids = new MatOfInt(class_ids_m);
-
-    //    // 填充NMS输入数据
-    //    for (int i = 0; i < actualOutputCount; i++)
-    //    {
-    //        // 转换为[x, y, w, h]格式
-    //        float x = outputBoxesData[i * 4 + 0];
-    //        float y = outputBoxesData[i * 4 + 1];
-    //        float w = outputBoxesData[i * 4 + 2] - x;
-    //        float h = outputBoxesData[i * 4 + 3] - y;
-
-    //        boxes_m_c4.put(i, 0, new double[] { x, y, w, h });
-    //        confidences_m.put(i, 0, outputConfidencesData[i]);
-    //        class_ids_m.put(i, 0, (int)outputClassIdsData[i]);
-    //    }
-
-    //    // non-maximum suppression
-
-
-
-    //    return results;
-    //}
-
-
-    //private int clearKernel;
-    //private int nmsKernel;
-
-    //private int maxDetections = 10000;
-    //private int threadGroupSize = 256;
-
-    //void Start()
-    //{
-    //    InitializeBuffers();
-
-    //    // 测试性能
-    //    RunPerformanceTest();
-    //}
-
-    //void InitializeBuffers()
-    //{
-    //    clearKernel = nmsComputeShader.FindKernel("ClearOutput");
-    //    nmsKernel = nmsComputeShader.FindKernel("NMSKernel");
-
-    //    inputBuffer = new ComputeBuffer(maxDetections, 6 * sizeof(float));
-    //    outputBuffer = new ComputeBuffer(maxDetections, 6 * sizeof(float));
-    //    suppressedBuffer = new ComputeBuffer(maxDetections, sizeof(int));
-    //    outputCountBuffer = new ComputeBuffer(1, sizeof(int));
-    //}
-
-    ///// <summary>
-    ///// 运行优化的NMS
-    ///// </summary>
-    //public unsafe List<float[]> RunNMSOptimized(float* detectionsPtr, int boxCount, float[] scores = null)
-    //{
-    //    if (boxCount > maxDetections)
-    //    {
-    //        Debug.LogError($"检测框数量{boxCount}超过最大值{maxDetections}");
-    //        return new List<float[]>();
-    //    }
-
-    //    // 如果需要按分数排序
-    //    if (scores != null)
-    //    {
-    //        // 排序检测框（按分数降序）
-    //        SortDetectionsByScore(detectionsPtr, boxCount, scores);
-    //    }
-
-    //    // 上传数据
-    //    inputBuffer.SetData(new Span<float>(detectionsPtr, boxCount * 6));
-
-    //    // 清除标记缓冲区
-    //    nmsComputeShader.SetBuffer(clearKernel, "outputCount", outputCountBuffer);
-    //    nmsComputeShader.Dispatch(clearKernel, 1, 1, 1);
-
-    //    // 设置参数
-    //    nmsComputeShader.SetFloat("nmsThreshold", nmsThreshold);
-    //    nmsComputeShader.SetInt("numDetections", boxCount);
-    //    nmsComputeShader.SetBuffer(nmsKernel, "inputBuffer", inputBuffer);
-    //    nmsComputeShader.SetBuffer(nmsKernel, "outputBuffer", outputBuffer);
-    //    nmsComputeShader.SetBuffer(nmsKernel, "suppressedBuffer", suppressedBuffer);
-    //    nmsComputeShader.SetBuffer(nmsKernel, "outputCount", outputCountBuffer);
-
-    //    // 调度计算
-    //    int threadGroups = Mathf.CeilToInt(boxCount / (float)threadGroupSize);
-    //    nmsComputeShader.Dispatch(nmsKernel, threadGroups, 1, 1);
-
-    //    // 获取结果
-    //    return GetOutputResults();
-    //}
-
-    ///// <summary>
-    ///// 按分数排序检测框（使用快速排序）
-    ///// </summary>
-    //private unsafe void SortDetectionsByScore(float* detectionsPtr, int boxCount, float[] scores)
-    //{
-    //    // 创建索引数组
-    //    int[] indices = new int[boxCount];
-    //    for (int i = 0; i < boxCount; i++) indices[i] = i;
-
-    //    // 按分数降序排序索引
-    //    System.Array.Sort(indices, (a, b) => scores[b].CompareTo(scores[a]));
-
-    //    // 重新排列检测框
-    //    float[] sortedDetections = new float[boxCount * 6];
-    //    for (int i = 0; i < boxCount; i++)
-    //    {
-    //        int srcIdx = indices[i] * 6;
-    //        int dstIdx = i * 6;
-
-    //        for (int j = 0; j < 6; j++)
-    //        {
-    //            sortedDetections[dstIdx + j] = detectionsPtr[srcIdx + j];
-    //        }
-    //    }
-
-    //    // 复制回原数组
-    //    for (int i = 0; i < boxCount * 6; i++)
-    //    {
-    //        detectionsPtr[i] = sortedDetections[i];
-    //    }
-    //}
-
-    //private List<float[]> GetOutputResults()
-    //{
-    //    int[] outputCount = new int[1];
-    //    outputCountBuffer.GetData(outputCount);
-    //    int actualOutputCount = outputCount[0];
-
-    //    float[] outputData = new float[actualOutputCount * 6];
-    //    outputBuffer.GetData(outputData, 0, 0, actualOutputCount * 6);
-
-    //    List<float[]> results = new List<float[]>();
-    //    for (int i = 0; i < actualOutputCount; i++)
-    //    {
-    //        int baseIdx = i * 6;
-    //        results.Add(new float[]
-    //        {
-    //            outputData[baseIdx],
-    //            outputData[baseIdx + 1],
-    //            outputData[baseIdx + 2],
-    //            outputData[baseIdx + 3],
-    //            outputData[baseIdx + 4],
-    //            outputData[baseIdx + 5]
-    //        });
-    //    }
-
-    //    return results;
-    //}
-
-    ///// <summary>
-    ///// 性能测试
-    ///// </summary>
-    //private void RunPerformanceTest()
-    //{
-    //    System.Random random = new System.Random();
-
-    //    // 生成测试数据
-    //    float[] testData = new float[10000 * 6];
-    //    for (int i = 0; i < 10000; i++)
-    //    {
-    //        int baseIdx = i * 6;
-    //        testData[baseIdx] = random.Next(0, 10);  // classId
-    //        testData[baseIdx + 1] = (float)random.NextDouble();  // score
-
-    //        // 随机框
-    //        float left = (float)random.NextDouble() * 1000;
-    //        float top = (float)random.NextDouble() * 1000;
-    //        float width = 20 + (float)random.NextDouble() * 100;
-    //        float height = 20 + (float)random.NextDouble() * 100;
-
-    //        testData[baseIdx + 2] = left;
-    //        testData[baseIdx + 3] = top;
-    //        testData[baseIdx + 4] = left + width;
-    //        testData[baseIdx + 5] = top + height;
-    //    }
-
-    //    // 运行NMS
-    //    var startTime = System.DateTime.Now;
-
-    //    unsafe
-    //    {
-    //        fixed (float* ptr = testData)
-    //        {
-    //            var results = RunNMSOptimized(ptr, 10000);
-    //            Debug.Log($"优化版NMS: 输入10000个框, 输出{results.Count}个框, 耗时{(System.DateTime.Now - startTime).TotalMilliseconds:F2}ms");
-    //        }
-    //    }
-    //}
-
-    //void OnDestroy()
-    //{
-    //    inputBuffer?.Release();
-    //    outputBuffer?.Release();
-    //    suppressedBuffer?.Release();
-    //    outputCountBuffer?.Release();
-    //}
-
 
 }

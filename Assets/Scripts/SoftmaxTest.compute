@@ -1,0 +1,44 @@
+#pragma kernel CSMain
+
+RWTexture2D<float4> outputTexture;
+
+StructuredBuffer<float> inputBuffer;
+
+void DrawRect(int2 pos, int width, int height, float conf) {
+    if (pos.x < 0 || pos.x >= width ||
+        pos.y < 0 || pos.y >= height)
+    {
+        return;
+    }
+    float4 writecolor = float4(1, 0, 0, 1);
+
+    outputTexture[pos] = outputTexture[pos] * (1-conf) + writecolor * conf;
+}
+
+[numthreads(128, 1, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID) {
+    uint width, height;
+    outputTexture.GetDimensions(width, height);
+
+    float x1 = (int)inputBuffer[id.x * 6];
+    float y1 = height - (int)inputBuffer[id.x * 6 + 1];
+    float x2 = (int)inputBuffer[id.x * 6 + 2];
+    float y2 = height - (int)inputBuffer[id.x * 6 + 3];
+    float conf = inputBuffer[id.x * 6 + 4];
+
+    for (int x = x1; x <= x2; x++) {
+        DrawRect(int2(x, y1), width, height, conf);
+    }
+
+    for (int x = x1; x <= x2; x++) {
+        DrawRect(int2(x, y2), width, height, conf);
+    }
+
+    for (int y = y2; y <= y1; y++) {
+        DrawRect(int2(x1, y), width, height, conf);
+    }
+
+    for (int y = y2; y <= y1; y++) {
+        DrawRect(int2(x2, y), width, height, conf);
+    }
+}
